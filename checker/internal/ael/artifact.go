@@ -235,7 +235,7 @@ func loadRecorderLog(root string, rec ManifestRecorder) (*RecorderLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open recorder %s: %w", rec.File, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	log := &RecorderLog{ID: rec.ID, Run: rec.Run, Key: strings.ToLower(rec.Key), File: rec.File}
 	sc := bufio.NewScanner(f)
@@ -340,7 +340,7 @@ func (a *Artifact) loadCounterparty() {
 		a.CounterpartyErr = err
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for lineNo := 1; sc.Scan(); lineNo++ {
 		line := strings.TrimRight(sc.Text(), "\r")

@@ -100,10 +100,6 @@ func parseSignedTreeHead(raw []byte) (signedTreeHead, error) {
 	return head, nil
 }
 
-func validateClosedObjectSchema(raw []byte, known map[string]bool) error {
-	return validateObjectSchema(raw, known, nil)
-}
-
 func validateObjectSchema(raw []byte, known map[string]bool, required []string) error {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
