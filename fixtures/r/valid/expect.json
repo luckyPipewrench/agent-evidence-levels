@@ -1,8 +1,13 @@
 {
-  "grade": 1,
-  "r": "+R",
-  "must": {
-    "R": "PASS"
-  },
+  "runs": [
+    {
+      "id": "run-r-valid",
+      "grade": 1,
+      "r": "+R",
+      "must": {
+        "R": "PASS"
+      }
+    }
+  ],
   "note": ""
 }

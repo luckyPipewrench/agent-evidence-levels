@@ -43,6 +43,10 @@ Each `.jsonl` line is:
   algorithm (§3) and require **byte-equality** with `payload_bytes`. Inequality or duplicate key →
   FAIL (non-canonical). This makes any non-canonical or key-duplicated payload fail even though its
   signature is valid.
+- **Closed-schema enforcement (separate, after canonicality):** signed payload objects reject
+  unrecognized top-level keys, except for a single reserved `ext` object. `ext`, when present, MUST
+  be a JSON object. The checker MUST treat `ext` as opaque signed forward-compatibility space: it
+  MUST NOT read, grade from, or assign semantics to anything under `ext`.
 
 ## 3. Canonical JSON
 
@@ -87,6 +91,11 @@ Type-specific:
 
 **Order commitment (AEL-0):** for `seq>0`, `prev` MUST equal hex SHA-256 of the `payload_bytes` at
 `seq-1`. Transposition and interior deletion both break this chain (and/or seq contiguity).
+
+Record payloads are closed-schema objects. Unknown top-level keys are nonconforming → FAIL. The only
+reserved top-level extension point is `ext`, and `ext` MUST be an object. This satisfies the
+versioning rule that additive extension fields are versioned and namespaced before checker or
+downstream use.
 
 **Why tail-truncation is silent at AEL-0:** with no `close` committing to `count`, dropping the last
 k records leaves a shorter still-valid chain. AEL-1's signed `close` (count + head) is what makes the
@@ -140,19 +149,25 @@ keys, and AEL-4 `counterparty.key` differs from verified recorder keys.
 ```
 {
   "log": "<log-id>",
-  "tree_head": {"size": <int>, "root": "<hex>", "sig": "<b64std>"},   // sig by log_key over canonical {"log","root","size"}
+  "tree_head": {"size": <int>, "root": "<hex>", "signed": "<b64std>", "sig": "<b64std>"},
   "entries": [{"recorder":"<id>","run":"<run>","seq":<int>,"leaf":"<hex>","index":<int>,"proof":["<hex>",...]}, ...]
 }
 ```
 
 Merkle tree is RFC 6962: `leaf_hash = SHA-256(0x00 || data)` where `data` = the anchored record's
-`payload_bytes`; `node = SHA-256(0x01 || left || right)`. The checker: verifies `tree_head.sig`
-under the provided `log_key` (absent → UV); requires `log_key` to differ from recorder signing keys
-(same key → FAIL); for each entry recomputes the root from `leaf`,`index`, `proof`,`size` and
-requires it equals `tree_head.root`. The latest anchored `seq` per recorder is the **anchored
-head**; records with higher `seq` are **UNANCHORED-WINDOW** (graded at the recorder's unanchored
-rung). A re-signed alternative chain whose record at an anchored `seq` differs yields a `leaf` that
-does not match the anchored `leaf` → **anchor mismatch (FAIL)**.
+`payload_bytes`; `node = SHA-256(0x01 || left || right)`. `tree_head.signed` is base64 (std,
+padded) of the exact canonical bytes signed by the log key. Those bytes MUST be the canonical JSON
+object `{"log":"<log-id>","root":"<hex>","size":<int>}` plus optional opaque `ext` object, and
+MUST canonicalize to the declared `log`, `tree_head.root`, and `tree_head.size`. The checker verifies
+`tree_head.sig` over those exact stored bytes under the provided `log_key` (absent → UV); requires
+`log_key` to differ from recorder signing keys (same key → FAIL); for each entry recomputes the root
+from `leaf`,`index`, `proof`,`size` and requires it equals `tree_head.root`. The latest anchored
+`seq` per recorder is the **anchored head**; records with higher `seq` are **UNANCHORED-WINDOW**
+(graded at the recorder's unanchored rung). A re-signed alternative chain whose record at an anchored
+`seq` differs yields a `leaf` that does not match the anchored `leaf` → **anchor mismatch (FAIL)**.
+
+`tree_head` and every anchor entry are closed-schema objects. Unknown top-level keys are
+nonconforming → FAIL, except for the reserved opaque `ext` object.
 
 ## 7. counterparty.jsonl (AEL-4)
 
@@ -166,9 +181,13 @@ Same compact `b64url(payload).b64url(sig)` line form, signed by the counterparty
 Checker: verify signature under `counterparty.key` (absent key or absent `counterparty.jsonl` → UV);
 require `counterparty.key` to differ from recorder signing keys (same key → FAIL); require `run`
 equals the artifact run AND `nonce` equals the run `open` record's `cp_nonce` (mismatch →
-**wrong-run, rejected**); two-way audit over declared `flows` matching `activity` events
-(`dir:"out"`, class in `flows`) to `received.event_id` — report `recorded-but-unconfirmed` and
-`confirmed-but-unrecorded`.
+**wrong-run, rejected**); require exactly one of `received` with a non-empty `event_id` or
+`none:true` (neither or both → FAIL); two-way audit over declared `flows` matching `activity` events
+(`dir:"out"`, class in `flows`) to `received.event_id`, while `none:true` contributes no received
+event ids — report `recorded-but-unconfirmed` and `confirmed-but-unrecorded`.
+
+Counterparty payloads are closed-schema objects. Unknown top-level keys are nonconforming → FAIL,
+except for the reserved opaque `ext` object.
 
 ## 8. policy docs & R (policy/<policy-hash>.json, canonical JSON)
 
@@ -194,6 +213,9 @@ Per check: `PASS` | `FAIL` | `UV`. `FAIL` = ran and property violated (tamper/no
 = could not complete (missing key/format/proof). Both cap the grade; only FAIL impeaches the
 artifact. A run with no `close` is `OPEN/ABNORMAL-END` (first-class, distinct from PASS/FAIL).
 
-Final grade line: `AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor: <a>; retention: <r>)`
-computed as the **minimum over required sub-dimensions**, cumulative from AEL-0. For each rung above
-the grade, the checker prints the dimension that capped it and whether it was FAIL or UV.
+Final grade lines are per run: `run <id>: AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor:
+<a>; retention: <r>)`, computed independently for each `manifest.runs` entry as the **minimum over
+required sub-dimensions**, cumulative from AEL-0. A single-run artifact emits one grade line. A
+multi-run artifact emits one grade line per run; no single headline grade may hide a degraded run. For
+each rung above each run's grade, the checker prints the dimension that capped it and whether it was
+FAIL or UV. Machine-readable output is `{"runs":[...]}`, with one result object per run.

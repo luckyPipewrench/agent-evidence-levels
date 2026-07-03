@@ -1,8 +1,13 @@
 {
-  "grade": "ungraded",
-  "r": "pending",
-  "must": {
-    "b": "FAIL"
-  },
+  "runs": [
+    {
+      "id": "run-ael0-dupkey",
+      "grade": "ungraded",
+      "r": "pending",
+      "must": {
+        "b": "FAIL"
+      }
+    }
+  ],
   "note": ""
 }

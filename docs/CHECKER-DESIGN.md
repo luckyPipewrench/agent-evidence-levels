@@ -13,11 +13,15 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **c `byteflip`** — a record with any payload byte changed must fail `a` (verifier rejects).
 - **d `transpose`** — two records swapped must break the `prev`/`seq` chain (reject).
 - **e `interior_del`** — an interior record removed must break `prev`/`seq` (reject).
+- **w `schema`** — verified closed-schema objects reject unknown top-level keys, except for the
+  reserved opaque `ext` object. This covers record payloads, counterparty payloads, anchor entries,
+  and `tree_head`.
 
 ### AEL-1 (gap/truncation-evident within a run)
 - **f `open`** — recorder has an `open` at seq 0 with `hmax>0` (else caps at AEL-0).
 - **g `contiguous`** — seq is 0..N contiguous, no gaps (gap → FAIL).
-- **h `heartbeat`** — spacing between consecutive records ≤ `hmax + htol` (exceed → FAIL).
+- **h `heartbeat`** — timestamps are monotonic and spacing between consecutive records ≤
+  `hmax + htol` (backwards time or exceed → FAIL).
 - **i `close_count`** — `close.count` equals records present; `close.head` matches record at count-2 (tail removed → FAIL).
 - **j `open_end`** — a run with no `close` classifies `OPEN/ABNORMAL-END` (first-class, not PASS/FAIL).
 
@@ -27,7 +31,8 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **m `cross_audit`** — for non-empty `correspondence.classes`, every covered event on any recorder is present on every other recorder (matched by `event.id`); a one-sided event → FAIL (discrepancy named). Missing or empty classes → UV because omission detection has no checkable scope.
 
 ### AEL-3 (externally anchored)
-- **n `treehead`** — `anchors.tree_head.sig` verifies under `anchor.log_key` (absent → UV).
+- **n `treehead`** — `anchors.tree_head.sig` verifies under `anchor.log_key` over the exact stored
+  `tree_head.signed` bytes, and those bytes canonicalize to the declared log/root/size (absent → UV).
 - **o `inclusion`** — every entry's Merkle inclusion proof recomputes to `tree_head.root`.
 - **p `alt_history`** — a re-signed alternative chain whose anchored-seq record differs → leaf ≠ anchored leaf → FAIL (anchor mismatch).
 - **q `unanchored`** — records with seq beyond the anchored head labeled `UNANCHORED-WINDOW` and capped at the unanchored rung.
@@ -35,7 +40,7 @@ Every check yields `PASS` | `FAIL` | `UV`.
 
 ### AEL-4 (counterparty-confirmed)
 - **r `cp_sig`** — every counterparty statement verifies under `counterparty.key` (absent → UV).
-- **s `cp_bind`** — statement `run` == artifact run AND `nonce` == run `open.cp_nonce` (mismatch → FAIL, wrong-run).
+- **s `cp_bind`** — statement `run` == artifact run AND `nonce` == run `open.cp_nonce` (mismatch → FAIL, wrong-run), and exactly one of non-empty `received.event_id` or `none:true` is present.
 - **t `cp_audit`** — for non-empty `flows`, two-way match of `dir:out` activities to `received.event_id`: report `recorded-but-unconfirmed` and `confirmed-but-unrecorded` (unresolved → FAIL). Empty flows → UV because no confirmation scope is declared.
 - **v `cp_key_independent`** — after `r` verifies statements under `counterparty.key`, that verified counterparty key must differ from every verified recorder signing key on the run (same key → FAIL).
 
@@ -45,13 +50,14 @@ Every check yields `PASS` | `FAIL` | `UV`.
 
 ## 2. Rung computation (minimum over required sub-dimensions)
 
-Per recorder then per run, compute each sub-dimension; grade = highest n with AEL-0..n all satisfied
-(cumulative). A required check that FAILs caps the grade below and reports FAIL; one that is UV caps
-below and reports UV (distinct).
+Per recorder then per run, compute each sub-dimension. The checker evaluates each `manifest.runs`
+entry independently and emits one result per run; grade = highest n with AEL-0..n all satisfied
+(cumulative) for that run. A required check that FAILs caps the grade below and reports FAIL; one
+that is UV caps below and reports UV (distinct).
 
 | Rung | Required (all must PASS) |
 |---|---|
-| AEL-0 | a, b, and chain-consistency for present records (c/d/e are the adversarial fixtures proving a/chain reject) |
+| AEL-0 | a, b, w, and chain-consistency for present records (c/d/e are the adversarial fixtures proving a/chain reject) |
 | AEL-1 | AEL-0 + f, g, h, i (j governs the no-close outcome) |
 | AEL-2 | AEL-1 on each recorder + k, l, m |
 | AEL-3 | AEL-2 + n, o, p, q, u |
@@ -62,12 +68,12 @@ chain-continuity gates 0/1; recorder-custody (l) gates 2; external-anchoring (n,
 counterparty-independence (r,s,t,v) gates 4; mediation-coverage, retention = annotations (bound
 claims, do not lower the number); decision-reproducibility = the R suffix.
 
-Grade line: `AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor: <a>; retention: <r>)`.
+Grade line: `run <id>: AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor: <a>; retention: <r>)`.
 
 ## 3. Fixture matrix
 
 Under `fixtures/`, one directory per case. Each case has an `expect.json`:
-`{"grade": <n>|"ungraded", "r": "+R"|"pending"|"fail", "must": {"<check>": "PASS|FAIL|UV"}, "note": "..."}`.
+`{"runs":[{"id":"<run>","grade":<n>|"ungraded","r":"+R"|"pending"|"fail","must":{"<check>":"PASS|FAIL|UV"}}],"note":"..."}`.
 The generator (`checker/cmd/aelgen`) builds them all from a fixed test seed (Ed25519 from a labeled
 constant seed — test-only material, not a secret). `make check` regenerates + runs the checker and
 asserts each case matches its `expect.json`.
@@ -86,8 +92,11 @@ asserts each case matches its `expect.json`.
 | `ael1/valid` | AEL-1 | — | grade 1 |
 | `ael1/seq_gap` | — | g | check g FAIL |
 | `ael1/heartbeat_gap` | — | h | check h FAIL |
+| `ael1/nonmonotonic_ts` | — | h | check h FAIL |
 | `ael1/tail_truncated` | — | i | check i FAIL |
 | `ael1/no_close` | AEL-0 | j | OPEN/ABNORMAL-END, grade caps at 0 |
+| `ael1/unknown_field_rejected` | — | w | unknown signed top-level key FAIL |
+| `ael1/ext_field_accepted` | AEL-1 | — | reserved `ext` object ignored for grading |
 | `ael2/valid` | AEL-2 | — | grade 2 |
 | `ael2/manifest_key_forgery` | — | l | one signing key signs both recorders while manifest declares different recorder keys; check l FAIL, grade caps at 1 |
 | `ael2/empty_classes` | — | m (UV) | empty `correspondence.classes` is **UV**, grade caps at 1 |
@@ -96,6 +105,7 @@ asserts each case matches its `expect.json`.
 | `ael2/third_recorder_shares_key` | — | l | third recorder shares r1's verified signing key; all-pairs check l FAIL |
 | `ael2/third_recorder_omits_event` | — | m | third recorder omits a covered event; all-recorder cross-audit m FAIL |
 | `ael3/valid` | AEL-3 | — | grade 3 |
+| `ael3/treehead_noncanonical_signed` | — | n | exact signed tree-head bytes are non-canonical; check n FAIL |
 | `ael3/bad_inclusion` | — | o | check o FAIL |
 | `ael3/alt_history` | — | p | check p FAIL (anchor mismatch) |
 | `ael3/no_logkey` | AEL-2 | n (UV) | check n **UV**, grade caps at 2 |
@@ -104,6 +114,8 @@ asserts each case matches its `expect.json`.
 | `ael3/logkey_forgery` | — | u | log key equals a recorder's verified signing key while manifest recorder key would not reveal it; check u FAIL |
 | `ael3/unanchored_tail` | AEL-2 | q | check q FAIL (UNANCHORED-WINDOW), grade caps at 2 |
 | `ael4/valid` | AEL-4 | — | grade 4, +R |
+| `ael4/counterparty_none` | AEL-4 | — | signed `none:true` all-clear path grades 4 |
+| `ael4/counterparty_empty_statement` | — | s | neither `received` nor `none:true`; check s FAIL |
 | `ael4/wrong_run_confirmation` | — | s | check s FAIL |
 | `ael4/no_counterparty_file` | AEL-3 | r/s/t (UV) | missing counterparty proof is **UV**, not artifact FAIL |
 | `ael4/unrecorded_delivery` | — | t | check t FAIL |
@@ -111,6 +123,7 @@ asserts each case matches its `expect.json`.
 | `ael4/cp_key_not_independent` | — | v | check v FAIL |
 | `r/valid` | (any) | — | +R |
 | `r/verdict_mismatch` | — | R2 | r fail |
+| `multi_run/mixed` | AEL-2 / AEL-0 | per-run grading | run A grades AEL-2; run B missing close grades AEL-0 |
 
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
 expected is the proof the standard is earned, not asserted.

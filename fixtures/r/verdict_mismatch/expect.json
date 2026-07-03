@@ -1,8 +1,13 @@
 {
-  "grade": 1,
-  "r": "fail",
-  "must": {
-    "R": "FAIL"
-  },
+  "runs": [
+    {
+      "id": "run-r-mismatch",
+      "grade": 1,
+      "r": "fail",
+      "must": {
+        "R": "FAIL"
+      }
+    }
+  ],
   "note": ""
 }

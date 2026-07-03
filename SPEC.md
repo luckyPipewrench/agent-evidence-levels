@@ -23,7 +23,7 @@ The Agent Evidence Level grades a record of AI-agent activity, from AEL-0 to AEL
 2. **Minimum rule.** A grade is the minimum over the required sub-dimensions (section 4). Nothing averages. The weakest required dimension is the grade.
 3. **Three outcomes per check: PASS, FAIL, UNABLE-TO-VERIFY (UV).** FAIL means the checker ran and the property was violated: affirmative evidence of tampering or nonconformance. UV means the check could not be completed (no published key, undocumented format, missing artifact, no runnable checker). UV caps the grade exactly as FAIL does, but it impeaches the verification, not the artifact. Checkers and reports MUST keep the two distinct; rounding UV to either PASS or FAIL is nonconforming.
 4. **No portable verification, no grade.** A mechanism whose records only its own producer can check is Ungraded, whatever its cryptography.
-5. **Reporting format.** A published grade MUST carry its annotations: `AEL-n [+R | R-pending] (coverage: ...; custody: ...; anchor: ...; retention: ...)`. A bare "AEL-3" is a nonconforming claim.
+5. **Reporting format.** A published grade MUST be per run and carry its annotations: `run <id>: AEL-n [+R | R-pending] (coverage: ...; custody: ...; anchor: ...; retention: ...)`. A bare "AEL-3" is a nonconforming claim, and a single headline number for a multi-run artifact is nonconforming.
 6. **R suffix.** Decision-reproducibility (section 3.6) is orthogonal to the rungs and is reported as `+R` or `R-pending` at every rung.
 
 ## 3. The rungs

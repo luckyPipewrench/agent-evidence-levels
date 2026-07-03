@@ -1,0 +1,23 @@
+{
+  "runs": [
+    {
+      "id": "run-mixed-a",
+      "grade": 2,
+      "r": "pending",
+      "must": {
+        "k": "PASS",
+        "l": "PASS",
+        "m": "PASS"
+      }
+    },
+    {
+      "id": "run-mixed-b",
+      "grade": 0,
+      "r": "pending",
+      "must": {
+        "j": "FAIL"
+      }
+    }
+  ],
+  "note": ""
+}

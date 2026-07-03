@@ -1,0 +1,1 @@
+{"ael_format":1,"claimed_rung":0,"coverage":"declared-only","custody":"same-process","recorders":[{"file":"recorders/r1.jsonl","id":"r1","key":"edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066","run":"run-ael1-unknown-field-rejected"}],"retention":{"custody":"fixture","period_days":30},"runs":["run-ael1-unknown-field-rejected"]}

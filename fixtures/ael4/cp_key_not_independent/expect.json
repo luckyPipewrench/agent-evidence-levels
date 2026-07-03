@@ -1,11 +1,16 @@
 {
-  "grade": 3,
-  "r": "+R",
-  "must": {
-    "r": "PASS",
-    "s": "PASS",
-    "t": "PASS",
-    "v": "FAIL"
-  },
+  "runs": [
+    {
+      "id": "run-ael4-valid",
+      "grade": 3,
+      "r": "+R",
+      "must": {
+        "r": "PASS",
+        "s": "PASS",
+        "t": "PASS",
+        "v": "FAIL"
+      }
+    }
+  ],
   "note": ""
 }

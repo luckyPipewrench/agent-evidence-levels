@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -13,7 +12,16 @@ import (
 
 const zeroPrev = "0000000000000000000000000000000000000000000000000000000000000000"
 
-func Evaluate(art *Artifact) Result {
+func Evaluate(art *Artifact) Report {
+	runs := artifactRuns(art)
+	report := Report{Runs: make([]Result, 0, len(runs))}
+	for _, run := range runs {
+		report.Runs = append(report.Runs, evaluateRun(art.ForRun(run)))
+	}
+	return report
+}
+
+func evaluateRun(art *Artifact) Result {
 	checks := map[string]Outcome{}
 	checks["a"] = checkSignatures(art)
 	checks["b"] = checkCanonicalPayloads(art)
@@ -21,6 +29,7 @@ func Evaluate(art *Artifact) Result {
 	chain := checkChain(art)
 	checks["d"] = chain
 	checks["e"] = chain
+	checks["w"] = checkClosedSchemas(art)
 	checks["f"] = checkOpen(art)
 	checks["g"] = checkContiguous(art)
 	checks["h"] = checkHeartbeat(art)
@@ -42,6 +51,7 @@ func Evaluate(art *Artifact) Result {
 	checks["R"] = rOutcome
 
 	res := Result{
+		Run:       artifactRun(art),
 		R:         rSuffix,
 		Checks:    checks,
 		Coverage:  art.Manifest.Coverage,
@@ -96,6 +106,37 @@ func checkCanonicalPayloads(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "canonicality is checked only after signature verification"}
 	}
 	return Outcome{Status: Pass, Message: "all verified payloads are canonical"}
+}
+
+func checkClosedSchemas(art *Artifact) Outcome {
+	sawUV := false
+	for _, rec := range art.AllRecords() {
+		if rec.SignatureUV || !rec.SignatureOK || !rec.CanonicalOK {
+			sawUV = true
+			continue
+		}
+		if !rec.SchemaOK {
+			return Outcome{Status: Fail, Message: recordMsg(rec, rec.SchemaErr)}
+		}
+	}
+	if art.Anchors != nil {
+		if err := validateAnchorSchemas(art.AnchorsRaw); err != nil {
+			return Outcome{Status: Fail, Message: err.Error()}
+		}
+	}
+	for _, stmt := range art.Counterparty {
+		if stmt.SignatureUV || !stmt.SignatureOK || !stmt.CanonicalOK {
+			sawUV = true
+			continue
+		}
+		if !stmt.SchemaOK {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, stmt.SchemaErr)}
+		}
+	}
+	if sawUV {
+		return Outcome{Status: UV, Message: "closed-schema check requires verified canonical signed payloads"}
+	}
+	return Outcome{Status: Pass, Message: "verified closed-schema objects have no unknown top-level keys outside ext"}
 }
 
 func checkByteflipDuty(sig Outcome) Outcome {
@@ -190,6 +231,9 @@ func checkHeartbeat(art *Artifact) Outcome {
 			curTS, err := log.Records[i].Payload.Time()
 			if err != nil {
 				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
+			}
+			if curTS.Before(prevTS) {
+				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("non-monotonic timestamp %s before previous %s", curTS.Format(time.RFC3339), prevTS.Format(time.RFC3339)))}
 			}
 			if curTS.Sub(prevTS) > limit {
 				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
@@ -329,21 +373,35 @@ func checkTreeHead(art *Artifact) Outcome {
 	if !ok {
 		return Outcome{Status: UV, Message: fmt.Sprintf("missing published log key %s", art.Manifest.Anchor.LogKey)}
 	}
-	sig, err := base64.StdEncoding.DecodeString(art.Anchors.TreeHead.Sig)
+	signed, err := decodeStdBase64Field("tree_head.signed", art.Anchors.TreeHead.Signed)
 	if err != nil {
-		return Outcome{Status: Fail, Message: fmt.Sprintf("decode tree_head.sig: %v", err)}
+		return Outcome{Status: Fail, Message: err.Error()}
+	}
+	canon, err := Canonicalize(signed)
+	if err != nil {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.signed canonicalize: %v", err)}
+	}
+	if !bytes.Equal(canon, signed) {
+		return Outcome{Status: Fail, Message: "tree_head.signed is not canonical"}
+	}
+	signedHead, err := parseSignedTreeHead(signed)
+	if err != nil {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.signed: %v", err)}
+	}
+	if signedHead.Log != art.Anchors.Log || signedHead.Root != art.Anchors.TreeHead.Root || signedHead.Size != art.Anchors.TreeHead.Size {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.signed declares log=%q root=%q size=%d, want log=%q root=%q size=%d", signedHead.Log, signedHead.Root, signedHead.Size, art.Anchors.Log, art.Anchors.TreeHead.Root, art.Anchors.TreeHead.Size)}
+	}
+	sig, err := decodeStdBase64Field("tree_head.sig", art.Anchors.TreeHead.Sig)
+	if err != nil {
+		return Outcome{Status: Fail, Message: err.Error()}
 	}
 	if len(sig) != ed25519.SignatureSize {
 		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.sig length %d", len(sig))}
 	}
-	msg, err := Canonicalize([]byte(fmt.Sprintf(`{"log":%q,"root":%q,"size":%d}`, art.Anchors.Log, art.Anchors.TreeHead.Root, art.Anchors.TreeHead.Size)))
-	if err != nil {
-		return Outcome{Status: Fail, Message: fmt.Sprintf("canonical tree head: %v", err)}
-	}
-	if !ed25519.Verify(pub, msg, sig) {
+	if !ed25519.Verify(pub, signed, sig) {
 		return Outcome{Status: Fail, Message: "tree_head.sig verification failed"}
 	}
-	return Outcome{Status: Pass, Message: "tree head signature verifies under log key"}
+	return Outcome{Status: Pass, Message: "tree head signature verifies over stored signed bytes under log key"}
 }
 
 func checkInclusion(art *Artifact) Outcome {
@@ -480,7 +538,7 @@ func checkCounterpartySignatures(art *Artifact) Outcome {
 	if len(art.Counterparty) == 0 {
 		return Outcome{Status: Fail, Message: "no counterparty statements"}
 	}
-	for _, stmt := range art.Counterparty {
+	for _, stmt := range counterpartyStatementsForRun(art) {
 		if stmt.SignatureUV {
 			return Outcome{Status: UV, Message: stmt.SignatureErr.Error()}
 		}
@@ -489,6 +547,9 @@ func checkCounterpartySignatures(art *Artifact) Outcome {
 		}
 		if !stmt.CanonicalOK {
 			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, stmt.CanonicalErr)}
+		}
+		if !stmt.SchemaOK {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, stmt.SchemaErr)}
 		}
 	}
 	return Outcome{Status: Pass, Message: "all counterparty statements verify"}
@@ -506,7 +567,12 @@ func checkCounterpartyBinding(art *Artifact) Outcome {
 	if nonce == "" {
 		return Outcome{Status: Fail, Message: "run open record has no cp_nonce"}
 	}
-	for _, stmt := range art.Counterparty {
+	statements := counterpartyStatementsForRun(art)
+	if len(statements) == 0 && len(art.Counterparty) > 0 {
+		stmt := art.Counterparty[0]
+		return Outcome{Status: Fail, Message: counterpartyMsg(stmt, fmt.Errorf("wrong-run: run=%q nonce=%q want run=%q nonce=%q", stmt.Payload.Run, stmt.Payload.Nonce, run, nonce))}
+	}
+	for _, stmt := range statements {
 		if stmt.LineErr != nil || stmt.ParseErr != nil || stmt.SignatureUV || !stmt.SignatureOK {
 			return Outcome{Status: UV, Message: "counterparty statements are not verified"}
 		}
@@ -515,6 +581,9 @@ func checkCounterpartyBinding(art *Artifact) Outcome {
 		}
 		if stmt.Payload.Run != run || stmt.Payload.Nonce != nonce {
 			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, fmt.Errorf("wrong-run: run=%q nonce=%q want run=%q nonce=%q", stmt.Payload.Run, stmt.Payload.Nonce, run, nonce))}
+		}
+		if err := validateCounterpartyReceiptChoice(stmt.PayloadRaw); err != nil {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, err)}
 		}
 	}
 	return Outcome{Status: Pass, Message: "counterparty statements bind to run and nonce"}
@@ -543,14 +612,14 @@ func checkCounterpartyAudit(art *Artifact) Outcome {
 		}
 	}
 	confirmed := map[string]bool{}
-	for _, stmt := range art.Counterparty {
+	for _, stmt := range counterpartyStatementsForRun(art) {
 		if stmt.LineErr != nil || stmt.ParseErr != nil || stmt.SignatureUV || !stmt.SignatureOK {
 			return Outcome{Status: UV, Message: "counterparty statements are not verified"}
 		}
 		if stmt.Payload.Run != run || stmt.Payload.Nonce != nonce {
 			return Outcome{Status: UV, Message: "counterparty binding failed; audit not evaluated"}
 		}
-		if !flows[stmt.Payload.Flow] || stmt.Payload.Received == nil {
+		if !flows[stmt.Payload.Flow] || stmt.Payload.None {
 			continue
 		}
 		if id := stmt.Payload.Received["event_id"]; id != "" {
@@ -633,9 +702,9 @@ func computeGrade(res *Result) {
 		res.Notes = append(res.Notes, "AEL-0 capped: signature verification is UV")
 		return
 	}
-	if !allPass(res.Checks, "a", "b", "d", "e") {
+	if !allPass(res.Checks, "a", "b", "d", "e", "w") {
 		res.Ungraded = true
-		res.Notes = append(res.Notes, "AEL-0 capped: authentic ordered canonical record chain not established")
+		res.Notes = append(res.Notes, "AEL-0 capped: authentic ordered canonical closed-schema record chain not established")
 		return
 	}
 	res.Grade = 0
@@ -716,6 +785,30 @@ func logsForArtifactRun(art *Artifact) []*RecorderLog {
 	return logs
 }
 
+func artifactRuns(art *Artifact) []string {
+	seen := map[string]bool{}
+	var runs []string
+	for _, run := range art.Manifest.Runs {
+		if run != "" && !seen[run] {
+			seen[run] = true
+			runs = append(runs, run)
+		}
+	}
+	if len(runs) > 0 {
+		return runs
+	}
+	for _, log := range art.RecorderLogs {
+		if log.Run != "" && !seen[log.Run] {
+			seen[log.Run] = true
+			runs = append(runs, log.Run)
+		}
+	}
+	if len(runs) == 0 {
+		runs = append(runs, "")
+	}
+	return runs
+}
+
 func artifactRun(art *Artifact) string {
 	if len(art.Manifest.Runs) > 0 {
 		return art.Manifest.Runs[0]
@@ -761,6 +854,9 @@ func recorderAEL1(log *RecorderLog) Outcome {
 		curTS, err := log.Records[i].Payload.Time()
 		if err != nil {
 			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
+		}
+		if curTS.Before(prevTS) {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("non-monotonic timestamp %s before previous %s", curTS.Format(time.RFC3339), prevTS.Format(time.RFC3339)))}
 		}
 		if curTS.Sub(prevTS) > limit {
 			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
@@ -930,6 +1026,21 @@ func runNonce(art *Artifact, run string) string {
 		return nonce
 	}
 	return ""
+}
+
+func counterpartyStatementsForRun(art *Artifact) []*CounterpartyStatement {
+	run := artifactRun(art)
+	var out []*CounterpartyStatement
+	for _, stmt := range art.Counterparty {
+		if stmt.LineErr != nil || stmt.ParseErr != nil {
+			out = append(out, stmt)
+			continue
+		}
+		if stmt.Payload.Run == run {
+			out = append(out, stmt)
+		}
+	}
+	return out
 }
 
 func recordMsg(rec *Record, err error) string {

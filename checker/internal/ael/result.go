@@ -20,6 +20,7 @@ type Outcome struct {
 }
 
 type Result struct {
+	Run        string             `json:"run"`
 	Grade      int                `json:"-"`
 	Ungraded   bool               `json:"-"`
 	R          string             `json:"r"`
@@ -31,6 +32,10 @@ type Result struct {
 	Open       bool               `json:"open"`
 	OpenStatus string             `json:"open_status,omitempty"`
 	Notes      []string           `json:"notes,omitempty"`
+}
+
+type Report struct {
+	Runs []Result `json:"runs"`
 }
 
 func (r Result) MarshalJSON() ([]byte, error) {
@@ -68,8 +73,8 @@ func (r Result) RLabel() string {
 }
 
 func (r Result) GradeLine() string {
-	return fmt.Sprintf("%s %s (coverage: %s; custody: %s; anchor: %s; retention: %s)",
-		r.GradeString(), r.RLabel(), emptyAsUnknown(r.Coverage), emptyAsUnknown(r.Custody),
+	return fmt.Sprintf("run %s: %s %s (coverage: %s; custody: %s; anchor: %s; retention: %s)",
+		emptyAsUnknown(r.Run), r.GradeString(), r.RLabel(), emptyAsUnknown(r.Coverage), emptyAsUnknown(r.Custody),
 		emptyAsUnknown(r.Anchor), emptyAsUnknown(r.Retention))
 }
 
@@ -87,10 +92,10 @@ func CheckIDs(checks map[string]Outcome) []string {
 func checkOrder(id string) int {
 	order := map[string]int{
 		"a": 1, "b": 2, "c": 3, "d": 4, "e": 5,
-		"f": 6, "g": 7, "h": 8, "i": 9, "j": 10,
-		"k": 11, "l": 12, "m": 13, "n": 14, "o": 15,
-		"p": 16, "q": 17, "u": 18, "r": 19, "s": 20,
-		"t": 21, "v": 22, "R": 23,
+		"w": 6, "f": 7, "g": 8, "h": 9, "i": 10, "j": 11,
+		"k": 12, "l": 13, "m": 14, "n": 15, "o": 16,
+		"p": 17, "q": 18, "u": 19, "r": 20, "s": 21,
+		"t": 22, "v": 23, "R": 24,
 	}
 	if n, ok := order[id]; ok {
 		return n

@@ -4,13 +4,14 @@ Grades for concrete deployments and mechanisms, one row each. This registry take
 
 **The rule, applied to every row including the editor's:** a row must link an artifact and a
 reference-checker transcript. A row with no runnable evidence is marked **asserted** and carries no
-weight. A grade is written in full: `AEL-n [+R | R-pending] (coverage: ...; custody: ...; anchor:
-...; retention: ...)`. A bare number is not a grade.
+weight. A grade is written in full per run: `run <id>: AEL-n [+R | R-pending] (coverage: ...;
+custody: ...; anchor: ...; retention: ...)`. A bare number is not a grade.
 
 ## Editor's row (stated at the defensible floor)
 
-**Editor's own deployment: `AEL-0, R-pending (coverage: enforced-total on kernel-contained hosts,
-mediated-only elsewhere; custody: same-operator; anchor: none; retention: operator-configured)`.**
+**Editor's own deployment: `run asserted-current: AEL-0 R-pending (coverage: enforced-total on
+kernel-contained hosts, mediated-only elsewhere; custody: same-operator; anchor: none; retention:
+operator-configured)`.**
 
 Earned today: signed, hash-chained decision records, offline-verifiable against a published key,
 with policy-hash binding and in-chain gap and order detection. That earns AEL-0 and nothing above
@@ -33,7 +34,7 @@ If this scale graded its own editor at the top, you should distrust the scale.
 
 | Deployment / mechanism | Grade | Evidence | Notes |
 |---|---|---|---|
-| Editor's own deployment | AEL-0, R-pending | asserted | See editor's row above. |
+| Editor's own deployment | run asserted-current: AEL-0 R-pending | asserted | See editor's row above. |
 
 To add a row: open a pull request appending to the table with a link to your artifact bundle and
 the checker transcript (`aelcheck <artifact> > transcript.txt`). Rows without both links keep the

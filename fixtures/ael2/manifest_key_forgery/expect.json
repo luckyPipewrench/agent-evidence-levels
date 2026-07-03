@@ -1,8 +1,13 @@
 {
-  "grade": 1,
-  "r": "pending",
-  "must": {
-    "l": "FAIL"
-  },
+  "runs": [
+    {
+      "id": "run-ael2-valid",
+      "grade": 1,
+      "r": "pending",
+      "must": {
+        "l": "FAIL"
+      }
+    }
+  ],
   "note": ""
 }

@@ -60,6 +60,8 @@ type Record struct {
 	ParseErr     error
 	CanonicalErr error
 	CanonicalOK  bool
+	SchemaErr    error
+	SchemaOK     bool
 	SignatureOK  bool
 	SignatureUV  bool
 	SignatureErr error
@@ -125,6 +127,11 @@ func (r *Record) Verify(keys map[string]ed25519.PublicKey) {
 		return
 	}
 	r.CanonicalOK = true
+	if err := validateRecordPayloadSchema(r.PayloadRaw, r.Payload.Type); err != nil {
+		r.SchemaErr = err
+		return
+	}
+	r.SchemaOK = true
 }
 
 func decodeCompactBase64(s string) ([]byte, error) {

@@ -1,8 +1,13 @@
 {
-  "grade": "ungraded",
-  "r": "pending",
-  "must": {
-    "a": "UV"
-  },
+  "runs": [
+    {
+      "id": "run-ael0-valid",
+      "grade": "ungraded",
+      "r": "pending",
+      "must": {
+        "a": "UV"
+      }
+    }
+  ],
   "note": ""
 }

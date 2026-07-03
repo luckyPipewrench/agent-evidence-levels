@@ -1,10 +1,15 @@
 {
-  "grade": 3,
-  "r": "+R",
-  "must": {
-    "r": "UV",
-    "s": "UV",
-    "t": "UV"
-  },
+  "runs": [
+    {
+      "id": "run-ael4-valid",
+      "grade": 3,
+      "r": "+R",
+      "must": {
+        "r": "UV",
+        "s": "UV",
+        "t": "UV"
+      }
+    }
+  ],
   "note": ""
 }

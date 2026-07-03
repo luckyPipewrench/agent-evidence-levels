@@ -14,7 +14,15 @@ type expectation struct {
 	Grade any               `json:"grade"`
 	R     string            `json:"r"`
 	Must  map[string]string `json:"must"`
+	Runs  []runExpectation  `json:"runs"`
 	Note  string            `json:"note"`
+}
+
+type runExpectation struct {
+	ID    string            `json:"id"`
+	Grade any               `json:"grade"`
+	R     string            `json:"r"`
+	Must  map[string]string `json:"must"`
 }
 
 func TestCorpus(t *testing.T) {
@@ -38,24 +46,45 @@ func TestCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			res := ael.Evaluate(art)
-			if got, want := gradeString(res), expectedGrade(exp.Grade); got != want {
-				t.Fatalf("grade mismatch: got %s want %s\nnotes: %v", got, want, res.Notes)
+			report := ael.Evaluate(art)
+			runExps := exp.runExpectations()
+			if len(report.Runs) != len(runExps) {
+				t.Fatalf("run count mismatch: got %d want %d", len(report.Runs), len(runExps))
 			}
-			if res.R != exp.R {
-				t.Fatalf("R mismatch: got %s want %s", res.R, exp.R)
+			byRun := map[string]ael.Result{}
+			for _, res := range report.Runs {
+				byRun[res.Run] = res
 			}
-			for id, want := range exp.Must {
-				got, ok := res.Checks[id]
+			for _, runExp := range runExps {
+				res, ok := byRun[runExp.ID]
 				if !ok {
-					t.Fatalf("missing check %s", id)
+					t.Fatalf("missing run result %q", runExp.ID)
 				}
-				if string(got.Status) != want {
-					t.Fatalf("check %s mismatch: got %s want %s\nmessage: %s", id, got.Status, want, got.Message)
+				if got, want := gradeString(res), expectedGrade(runExp.Grade); got != want {
+					t.Fatalf("run %s grade mismatch: got %s want %s\nnotes: %v", runExp.ID, got, want, res.Notes)
+				}
+				if res.R != runExp.R {
+					t.Fatalf("run %s R mismatch: got %s want %s", runExp.ID, res.R, runExp.R)
+				}
+				for id, want := range runExp.Must {
+					got, ok := res.Checks[id]
+					if !ok {
+						t.Fatalf("run %s missing check %s", runExp.ID, id)
+					}
+					if string(got.Status) != want {
+						t.Fatalf("run %s check %s mismatch: got %s want %s\nmessage: %s", runExp.ID, id, got.Status, want, got.Message)
+					}
 				}
 			}
 		})
 	}
+}
+
+func (e expectation) runExpectations() []runExpectation {
+	if len(e.Runs) > 0 {
+		return e.Runs
+	}
+	return []runExpectation{{ID: "", Grade: e.Grade, R: e.R, Must: e.Must}}
 }
 
 func collectExpectations(root string) ([]string, error) {

@@ -63,9 +63,10 @@ type Anchors struct {
 }
 
 type TreeHead struct {
-	Size int    `json:"size"`
-	Root string `json:"root"`
-	Sig  string `json:"sig"`
+	Size   int    `json:"size"`
+	Root   string `json:"root"`
+	Sig    string `json:"sig"`
+	Signed string `json:"signed"`
 }
 
 type AnchorEntry struct {
@@ -98,6 +99,8 @@ type CounterpartyStatement struct {
 	ParseErr     error
 	CanonicalErr error
 	CanonicalOK  bool
+	SchemaErr    error
+	SchemaOK     bool
 	SignatureOK  bool
 	SignatureUV  bool
 	SignatureErr error
@@ -406,6 +409,14 @@ func (s *CounterpartyStatement) Verify(keys map[string]ed25519.PublicKey, fp str
 		return
 	}
 	s.CanonicalOK = true
+	if err := validateClosedObjectSchema(s.PayloadRaw, map[string]bool{
+		"v": true, "type": true, "run": true, "flow": true, "nonce": true,
+		"received": true, "none": true, "ext": true,
+	}); err != nil {
+		s.SchemaErr = err
+		return
+	}
+	s.SchemaOK = true
 }
 
 func (a *Artifact) AllRecords() []*Record {
@@ -414,4 +425,26 @@ func (a *Artifact) AllRecords() []*Record {
 		out = append(out, log.Records...)
 	}
 	return out
+}
+
+func (a *Artifact) ForRun(run string) *Artifact {
+	view := *a
+	view.Manifest.Runs = []string{run}
+	view.RecorderLogs = nil
+	for _, log := range a.RecorderLogs {
+		if log.Run == run {
+			view.RecorderLogs = append(view.RecorderLogs, log)
+		}
+	}
+	if a.Anchors != nil {
+		anchors := *a.Anchors
+		anchors.Entries = nil
+		for _, entry := range a.Anchors.Entries {
+			if entry.Run == run {
+				anchors.Entries = append(anchors.Entries, entry)
+			}
+		}
+		view.Anchors = &anchors
+	}
+	return &view
 }

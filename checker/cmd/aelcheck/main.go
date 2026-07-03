@@ -24,26 +24,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "aelcheck: %v\n", err)
 		os.Exit(1)
 	}
-	res := ael.Evaluate(art)
+	report := ael.Evaluate(art)
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(res); err != nil {
+		if err := enc.Encode(report); err != nil {
 			fmt.Fprintf(os.Stderr, "aelcheck: encode result: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	for _, id := range ael.CheckIDs(res.Checks) {
-		out := res.Checks[id]
-		fmt.Printf("%-2s %-4s %s\n", id, out.Status, out.Message)
+	for i, res := range report.Runs {
+		if len(report.Runs) > 1 {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("run %s checks:\n", res.Run)
+		}
+		for _, id := range ael.CheckIDs(res.Checks) {
+			out := res.Checks[id]
+			fmt.Printf("%-2s %-4s %s\n", id, out.Status, out.Message)
+		}
+		if res.OpenStatus != "" {
+			fmt.Printf("status: %s\n", res.OpenStatus)
+		}
+		for _, note := range res.Notes {
+			fmt.Printf("note: %s\n", note)
+		}
+		fmt.Println(res.GradeLine())
 	}
-	if res.OpenStatus != "" {
-		fmt.Printf("status: %s\n", res.OpenStatus)
-	}
-	for _, note := range res.Notes {
-		fmt.Printf("note: %s\n", note)
-	}
-	fmt.Println(res.GradeLine())
 }

@@ -1,8 +1,13 @@
 {
-  "grade": 0,
-  "r": "pending",
-  "must": {
-    "i": "FAIL"
-  },
+  "runs": [
+    {
+      "id": "run-ael1-tail-truncated",
+      "grade": 0,
+      "r": "pending",
+      "must": {
+        "i": "FAIL"
+      }
+    }
+  ],
   "note": ""
 }
