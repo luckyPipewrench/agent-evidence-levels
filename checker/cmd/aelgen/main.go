@@ -46,11 +46,20 @@ type expected struct {
 }
 
 type caseDef struct {
-	name        string
-	records     []signedRecord
-	policies    map[string][]byte
-	expect      expected
-	publishKeys bool
+	name            string
+	records         []signedRecord
+	recorderRecords map[string][]signedRecord
+	recorderKeys    map[string]string
+	policies        map[string][]byte
+	anchors         []byte
+	counterparty    []signedRecord
+	expect          expected
+	publishKeys     bool
+	omitKeys        map[string]bool
+	keys            map[string]ed25519.PublicKey
+	manifestExtra   map[string]any
+	coverage        string
+	custody         string
 }
 
 func main() {
@@ -94,6 +103,11 @@ func generate(outDir string, report bool) error {
 }
 
 func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
+	pub := priv.Public().(ed25519.PublicKey)
+	rec2Priv, rec2Pub, rec2FP := labeledKey("recorder-2")
+	logPriv, logPub, logFP := labeledKey("log-key")
+	cpPriv, cpPub, cpFP := labeledKey("counterparty")
+
 	ael0Valid, err := buildRecords(priv, "run-ael0-valid", "r1", fp, []recordPlan{
 		open("2026-01-01T00:00:00Z", 0, 0),
 		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
@@ -213,6 +227,111 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		return nil, err
 	}
 
+	ael2R1, err := buildRecords(priv, "run-ael2-valid", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	ael2R2, err := buildRecords(rec2Priv, "run-ael2-valid", "r2", rec2FP, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		activity("2026-01-01T00:00:11Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	oneSideR2, err := buildRecords(rec2Priv, "run-ael2-valid", "r2", rec2FP, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	sameKeyR2, err := buildRecords(priv, "run-ael2-valid", "r2", fp, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		activity("2026-01-01T00:00:11Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	ael3Anchor, err := buildAnchors("test-log", logPriv, map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2})
+	if err != nil {
+		return nil, err
+	}
+	badInclusion, err := corruptFirstProof(ael3Anchor)
+	if err != nil {
+		return nil, err
+	}
+	altHistoryR1, err := buildRecords(priv, "run-ael2-valid", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	cpNonce := "fixture-cp-nonce-ael4"
+	ael4Decision := map[string]any{
+		"policy":     policyHash,
+		"request_fp": "req-ael4-valid",
+		"inputs":     map[string]any{"risk": 7, "kind": "egress"},
+		"verdict":    "block",
+	}
+	ael4R1, err := buildRecords(priv, "run-ael4-valid", "r1", fp, []recordPlan{
+		openNonce("2026-01-01T00:00:00Z", 60, 5, cpNonce),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", ael4Decision, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	ael4R2, err := buildRecords(rec2Priv, "run-ael4-valid", "r2", rec2FP, []recordPlan{
+		openNonce("2026-01-01T00:00:01Z", 60, 5, cpNonce),
+		activity("2026-01-01T00:00:11Z", "net", "evt-1", "out", ael4Decision, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	ael4Anchor, err := buildAnchors("test-log", logPriv, map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2})
+	if err != nil {
+		return nil, err
+	}
+	cpValid, err := buildCounterparty(cpPriv, "run-ael4-valid", cpNonce, "net", "evt-1")
+	if err != nil {
+		return nil, err
+	}
+	cpWrongRun, err := buildCounterparty(cpPriv, "run-other", "other-nonce", "net", "evt-1")
+	if err != nil {
+		return nil, err
+	}
+	cpUnrecorded, err := buildCounterparty(cpPriv, "run-ael4-valid", cpNonce, "net", "evt-missing")
+	if err != nil {
+		return nil, err
+	}
+
+	ael2Extra := map[string]any{"correspondence": map[string]any{"classes": []any{"net"}, "match": "id"}}
+	ael3Extra := cloneAnyMap(ael2Extra)
+	ael3Extra["anchor"] = map[string]any{"log": "test-log", "log_key": logFP, "file": "anchors.json"}
+	ael4Extra := cloneAnyMap(ael3Extra)
+	ael4Extra["counterparty"] = map[string]any{"file": "counterparty.jsonl", "flows": []any{"net"}, "key": cpFP}
+	multiKeys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub}
+	anchoredKeys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub}
+	ael4Keys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub, cpFP: cpPub}
+
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
@@ -228,6 +347,16 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		{name: "ael1/no_close", records: noClose, expect: expect(0, "pending", map[string]string{"j": "FAIL"})},
 		{name: "r/valid", records: rValid, policies: map[string][]byte{policyHash: policyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"})},
 		{name: "r/verdict_mismatch", records: rMismatch, policies: map[string][]byte{policyHash: policyRaw}, expect: expect(1, "fail", map[string]string{"R": "FAIL"})},
+		{name: "ael2/valid", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"})},
+		{name: "ael2/one_side_deleted", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": oneSideR2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(1, "pending", map[string]string{"m": "FAIL"})},
+		{name: "ael2/same_key", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": sameKeyR2}, recorderKeys: map[string]string{"r1": fp, "r2": fp}, keys: map[string]ed25519.PublicKey{fp: pub}, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(1, "pending", map[string]string{"l": "FAIL"})},
+		{name: "ael3/valid", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(3, "pending", map[string]string{"n": "PASS", "o": "PASS", "p": "PASS"})},
+		{name: "ael3/bad_inclusion", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: badInclusion, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"o": "FAIL"})},
+		{name: "ael3/alt_history", recorderRecords: map[string][]signedRecord{"r1": altHistoryR1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"p": "FAIL"})},
+		{name: "ael3/no_logkey", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, omitKeys: map[string]bool{logFP: true}, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"n": "UV"})},
+		{name: "ael4/valid", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpValid, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(4, "+R", map[string]string{"r": "PASS", "s": "PASS", "t": "PASS", "R": "PASS"})},
+		{name: "ael4/wrong_run_confirmation", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpWrongRun, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"s": "FAIL"})},
+		{name: "ael4/unrecorded_delivery", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpUnrecorded, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"t": "FAIL"})},
 	}, nil
 }
 
@@ -253,39 +382,105 @@ func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
 			}
 		}
 	}
-	publishKeys := c.publishKeys || c.name != "ael0/unpublished_key"
-	if publishKeys {
-		if err := os.WriteFile(filepath.Join(caseDir, "keys", fp+".pub"), []byte(base64.StdEncoding.EncodeToString(pub)+"\n"), 0o644); err != nil {
+	if len(c.anchors) > 0 {
+		if err := os.WriteFile(filepath.Join(caseDir, "anchors.json"), c.anchors, 0o644); err != nil {
+			return err
+		}
+	}
+	if len(c.counterparty) > 0 {
+		var lines []string
+		for _, stmt := range c.counterparty {
+			lines = append(lines, stmt.line())
+		}
+		if err := os.WriteFile(filepath.Join(caseDir, "counterparty.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 			return err
 		}
 	}
 
-	var lines []string
-	for _, rec := range c.records {
-		lines = append(lines, rec.line())
+	keys := c.keys
+	if len(keys) == 0 {
+		keys = map[string]ed25519.PublicKey{fp: pub}
 	}
-	if err := os.WriteFile(filepath.Join(caseDir, "recorders", "r1.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		return err
-	}
-	run := "run-" + strings.ReplaceAll(strings.ReplaceAll(c.name, "/", "-"), "_", "-")
-	if len(c.records) > 0 {
-		var payload ael.Payload
-		_ = json.Unmarshal(c.records[0].payload, &payload)
-		if payload.Run != "" {
-			run = payload.Run
+	publishKeys := c.publishKeys || c.name != "ael0/unpublished_key"
+	if publishKeys {
+		keyFPs := make([]string, 0, len(keys))
+		for keyFP := range keys {
+			keyFPs = append(keyFPs, keyFP)
+		}
+		sort.Strings(keyFPs)
+		for _, keyFP := range keyFPs {
+			if c.omitKeys[keyFP] {
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(caseDir, "keys", keyFP+".pub"), []byte(base64.StdEncoding.EncodeToString(keys[keyFP])+"\n"), 0o644); err != nil {
+				return err
+			}
 		}
 	}
-	manifest, err := canonicalValue(map[string]any{
+
+	recorderRecords := c.recorderRecords
+	if len(recorderRecords) == 0 {
+		recorderRecords = map[string][]signedRecord{"r1": c.records}
+	}
+	recorderIDs := make([]string, 0, len(recorderRecords))
+	for recorderID := range recorderRecords {
+		recorderIDs = append(recorderIDs, recorderID)
+	}
+	sort.Strings(recorderIDs)
+	for _, recorderID := range recorderIDs {
+		var lines []string
+		for _, rec := range recorderRecords[recorderID] {
+			lines = append(lines, rec.line())
+		}
+		if err := os.WriteFile(filepath.Join(caseDir, "recorders", recorderID+".jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+
+	run := "run-" + strings.ReplaceAll(strings.ReplaceAll(c.name, "/", "-"), "_", "-")
+	for _, records := range recorderRecords {
+		if len(records) == 0 {
+			continue
+		}
+		var payload ael.Payload
+		_ = json.Unmarshal(records[0].payload, &payload)
+		if payload.Run != "" {
+			run = payload.Run
+			break
+		}
+	}
+
+	recorderEntries := make([]any, 0, len(recorderIDs))
+	for _, recorderID := range recorderIDs {
+		keyFP := c.recorderKeys[recorderID]
+		if keyFP == "" {
+			keyFP = fp
+		}
+		recorderEntries = append(recorderEntries, map[string]any{
+			"id": recorderID, "run": run, "key": keyFP, "file": "recorders/" + recorderID + ".jsonl",
+		})
+	}
+	coverage := c.coverage
+	if coverage == "" {
+		coverage = "declared-only"
+	}
+	custody := c.custody
+	if custody == "" {
+		custody = "same-process"
+	}
+	manifestMap := map[string]any{
 		"ael_format":   1,
 		"claimed_rung": claimedRung(c.expect.Grade),
-		"coverage":     "declared-only",
-		"custody":      "same-process",
+		"coverage":     coverage,
+		"custody":      custody,
 		"retention":    map[string]any{"period_days": 30, "custody": "fixture"},
 		"runs":         []any{run},
-		"recorders": []any{map[string]any{
-			"id": "r1", "run": run, "key": fp, "file": "recorders/r1.jsonl",
-		}},
-	})
+		"recorders":    recorderEntries,
+	}
+	for k, v := range c.manifestExtra {
+		manifestMap[k] = v
+	}
+	manifest, err := canonicalValue(manifestMap)
 	if err != nil {
 		return err
 	}
@@ -346,6 +541,10 @@ func open(ts string, hmax, htol int) recordPlan {
 	return recordPlan{typ: "open", ts: ts, extra: map[string]any{"hmax": hmax, "htol": htol}}
 }
 
+func openNonce(ts string, hmax, htol int, nonce string) recordPlan {
+	return recordPlan{typ: "open", ts: ts, extra: map[string]any{"hmax": hmax, "htol": htol, "cp_nonce": nonce}}
+}
+
 func activity(ts, class, id, dir string, decision map[string]any, patch func([]byte) []byte) recordPlan {
 	return recordPlan{typ: "activity", ts: ts, extra: eventExtra(class, id, dir, decision), rawPatch: patch}
 }
@@ -388,6 +587,102 @@ func policyFixture() (string, []byte, error) {
 	return shaHex(raw), raw, nil
 }
 
+func buildAnchors(logID string, logPriv ed25519.PrivateKey, logs map[string][]signedRecord) ([]byte, error) {
+	var recorderIDs []string
+	for recorderID := range logs {
+		recorderIDs = append(recorderIDs, recorderID)
+	}
+	sort.Strings(recorderIDs)
+	var entries []ael.AnchorEntry
+	var leaves [][]byte
+	index := 0
+	for _, recorderID := range recorderIDs {
+		for seq, rec := range logs[recorderID] {
+			leaf := merkleLeaf(rec.payload)
+			leaves = append(leaves, leaf)
+			entries = append(entries, ael.AnchorEntry{
+				Recorder: recorderID,
+				Run:      recordRun(rec),
+				Seq:      seq,
+				Leaf:     hex.EncodeToString(leaf),
+				Index:    index,
+			})
+			index++
+		}
+	}
+	root := merkleRoot(leaves)
+	proofs := merkleProofs(leaves)
+	for i := range entries {
+		for _, node := range proofs[i] {
+			entries[i].Proof = append(entries[i].Proof, hex.EncodeToString(node))
+		}
+	}
+	headMsg, err := canonicalValue(map[string]any{"log": logID, "root": hex.EncodeToString(root), "size": len(leaves)})
+	if err != nil {
+		return nil, err
+	}
+	anchors := map[string]any{
+		"log": logID,
+		"tree_head": map[string]any{
+			"size": len(leaves),
+			"root": hex.EncodeToString(root),
+			"sig":  base64.StdEncoding.EncodeToString(ed25519.Sign(logPriv, headMsg)),
+		},
+		"entries": anchorEntriesValue(entries),
+	}
+	return canonicalValue(anchors)
+}
+
+func anchorEntriesValue(entries []ael.AnchorEntry) []any {
+	out := make([]any, 0, len(entries))
+	for _, entry := range entries {
+		proof := make([]any, 0, len(entry.Proof))
+		for _, item := range entry.Proof {
+			proof = append(proof, item)
+		}
+		out = append(out, map[string]any{
+			"recorder": entry.Recorder,
+			"run":      entry.Run,
+			"seq":      entry.Seq,
+			"leaf":     entry.Leaf,
+			"index":    entry.Index,
+			"proof":    proof,
+		})
+	}
+	return out
+}
+
+func corruptFirstProof(raw []byte) ([]byte, error) {
+	var anchors ael.Anchors
+	if err := json.Unmarshal(raw, &anchors); err != nil {
+		return nil, err
+	}
+	if len(anchors.Entries) == 0 || len(anchors.Entries[0].Proof) == 0 {
+		return nil, fmt.Errorf("anchor has no proof to corrupt")
+	}
+	anchors.Entries[0].Proof[0] = strings.Repeat("f", 64)
+	return canonicalValue(map[string]any{
+		"log":       anchors.Log,
+		"tree_head": map[string]any{"size": anchors.TreeHead.Size, "root": anchors.TreeHead.Root, "sig": anchors.TreeHead.Sig},
+		"entries":   anchorEntriesValue(anchors.Entries),
+	})
+}
+
+func buildCounterparty(priv ed25519.PrivateKey, run, nonce, flow, eventID string) ([]signedRecord, error) {
+	raw, err := canonicalValue(map[string]any{
+		"v":        1,
+		"type":     "received",
+		"run":      run,
+		"flow":     flow,
+		"nonce":    nonce,
+		"received": map[string]any{"event_id": eventID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []signedRecord{{payload: raw, sig: ed25519.Sign(priv, raw)}}, nil
+}
+
 func canonicalValue(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -426,6 +721,21 @@ func cloneMap(in map[string]any) map[string]any {
 	return out
 }
 
+func cloneAnyMap(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func labeledKey(label string) (ed25519.PrivateKey, ed25519.PublicKey, string) {
+	seed := sha256.Sum256([]byte("AEL-FIXTURE-TEST-SEED-v1:" + label))
+	priv := ed25519.NewKeyFromSeed(seed[:])
+	pub := priv.Public().(ed25519.PublicKey)
+	return priv, pub, fingerprint(pub)
+}
+
 func fingerprint(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
 	return hex.EncodeToString(sum[:])
@@ -438,6 +748,65 @@ func shaHex(raw []byte) string {
 
 func zeroHash() string {
 	return strings.Repeat("0", 64)
+}
+
+func recordRun(rec signedRecord) string {
+	var payload ael.Payload
+	_ = json.Unmarshal(rec.payload, &payload)
+	return payload.Run
+}
+
+func merkleLeaf(raw []byte) []byte {
+	sum := sha256.Sum256(append([]byte{0x00}, raw...))
+	return sum[:]
+}
+
+func merkleRoot(leaves [][]byte) []byte {
+	if len(leaves) == 0 {
+		sum := sha256.Sum256(nil)
+		return sum[:]
+	}
+	if len(leaves) == 1 {
+		return append([]byte(nil), leaves[0]...)
+	}
+	split := largestPowerOfTwoLessThan(len(leaves))
+	return merkleNode(merkleRoot(leaves[:split]), merkleRoot(leaves[split:]))
+}
+
+func merkleProofs(leaves [][]byte) [][][]byte {
+	proofs := make([][][]byte, len(leaves))
+	for i := range leaves {
+		proofs[i] = merkleProof(leaves, i)
+	}
+	return proofs
+}
+
+func merkleProof(leaves [][]byte, index int) [][]byte {
+	if len(leaves) <= 1 {
+		return nil
+	}
+	split := largestPowerOfTwoLessThan(len(leaves))
+	if index < split {
+		return append(merkleProof(leaves[:split], index), merkleRoot(leaves[split:]))
+	}
+	return append(merkleProof(leaves[split:], index-split), merkleRoot(leaves[:split]))
+}
+
+func merkleNode(left, right []byte) []byte {
+	buf := make([]byte, 0, 1+len(left)+len(right))
+	buf = append(buf, 0x01)
+	buf = append(buf, left...)
+	buf = append(buf, right...)
+	sum := sha256.Sum256(buf)
+	return sum[:]
+}
+
+func largestPowerOfTwoLessThan(n int) int {
+	p := 1
+	for p<<1 < n {
+		p <<= 1
+	}
+	return p
 }
 
 func claimedRung(grade any) int {
@@ -477,7 +846,7 @@ func compareExpected(res ael.Result, exp expected) bool {
 
 func reportChecks(res ael.Result) string {
 	var parts []string
-	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "R"} {
+	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "R"} {
 		if out, ok := res.Checks[id]; ok {
 			parts = append(parts, fmt.Sprintf("%s=%s", id, out.Status))
 		}

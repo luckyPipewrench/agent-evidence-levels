@@ -1,0 +1,1 @@
+{"default":"allow","rules":[{"verdict":"block","when":{"field":"risk","op":"gte","value":5}}],"v":1}

@@ -1,6 +1,11 @@
 package ael
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -21,9 +26,16 @@ func Evaluate(art *Artifact) Result {
 	checks["h"] = checkHeartbeat(art)
 	checks["i"] = checkCloseCount(art)
 	checks["j"] = checkOpenEnd(art)
-	for _, id := range []string{"k", "l", "m", "n", "o", "p", "q", "r", "s", "t"} {
-		checks[id] = Outcome{Status: UV, Message: "not evaluated in Run 1"}
-	}
+	checks["k"] = checkTwoRecorders(art)
+	checks["l"] = checkKeysDiffer(art)
+	checks["m"] = checkCrossAudit(art)
+	checks["n"] = checkTreeHead(art)
+	checks["o"] = checkInclusion(art)
+	checks["p"] = checkAnchorLeaves(art)
+	checks["q"] = checkUnanchoredWindow(art)
+	checks["r"] = checkCounterpartySignatures(art)
+	checks["s"] = checkCounterpartyBinding(art)
+	checks["t"] = checkCounterpartyAudit(art)
 	rSuffix, rOutcome := checkR(art)
 	checks["R"] = rOutcome
 
@@ -40,6 +52,9 @@ func Evaluate(art *Artifact) Result {
 		res.OpenStatus = "OPEN/ABNORMAL-END"
 	}
 	computeGrade(&res)
+	if res.Grade >= 3 && !res.Ungraded {
+		res.Anchor = "independent"
+	}
 	return res
 }
 
@@ -222,6 +237,280 @@ func checkOpenEnd(art *Artifact) Outcome {
 	return Outcome{Status: Pass, Message: "closed or not claiming AEL-1 liveness"}
 }
 
+func checkTwoRecorders(art *Artifact) Outcome {
+	logs := logsForArtifactRun(art)
+	if len(logs) < 2 {
+		return Outcome{Status: Fail, Message: "fewer than two recorders on the run"}
+	}
+	for _, log := range logs[:2] {
+		if out := recorderAEL1(log); out.Status != Pass {
+			out.Message = fmt.Sprintf("%s is not independently AEL-1: %s", log.ID, out.Message)
+			return out
+		}
+	}
+	return Outcome{Status: Pass, Message: "two recorders independently satisfy AEL-1"}
+}
+
+func checkKeysDiffer(art *Artifact) Outcome {
+	logs := logsForArtifactRun(art)
+	if len(logs) < 2 {
+		return Outcome{Status: UV, Message: "need two recorders to compare key custody"}
+	}
+	if logs[0].Key == "" || logs[1].Key == "" {
+		return Outcome{Status: UV, Message: "recorder key fingerprint is missing"}
+	}
+	if logs[0].Key == logs[1].Key {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("recorders %s and %s use the same key %s", logs[0].ID, logs[1].ID, logs[0].Key)}
+	}
+	return Outcome{Status: Pass, Message: "recorder key fingerprints differ"}
+}
+
+func checkCrossAudit(art *Artifact) Outcome {
+	if art.Manifest.Correspondence == nil {
+		return Outcome{Status: UV, Message: "manifest correspondence block is absent"}
+	}
+	if art.Manifest.Correspondence.Match != "id" {
+		return Outcome{Status: UV, Message: fmt.Sprintf("unsupported correspondence match %q", art.Manifest.Correspondence.Match)}
+	}
+	logs := logsForArtifactRun(art)
+	if len(logs) < 2 {
+		return Outcome{Status: UV, Message: "need two recorders for cross-audit"}
+	}
+	classes := stringSet(art.Manifest.Correspondence.Classes)
+	left := coveredEvents(logs[0], classes)
+	right := coveredEvents(logs[1], classes)
+	for id := range left {
+		if _, ok := right[id]; !ok {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("one-sided event %s present on %s absent from %s", id, logs[0].ID, logs[1].ID)}
+		}
+	}
+	for id := range right {
+		if _, ok := left[id]; !ok {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("one-sided event %s present on %s absent from %s", id, logs[1].ID, logs[0].ID)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "covered event ids match across recorders"}
+}
+
+func checkTreeHead(art *Artifact) Outcome {
+	if art.Manifest.Anchor == nil {
+		return Outcome{Status: UV, Message: "manifest anchor block is absent"}
+	}
+	if art.AnchorsErr != nil {
+		return Outcome{Status: Fail, Message: art.AnchorsErr.Error()}
+	}
+	if art.Anchors == nil {
+		return Outcome{Status: UV, Message: "anchors.json is absent"}
+	}
+	pub, ok := art.Keys[strings.ToLower(art.Manifest.Anchor.LogKey)]
+	if !ok {
+		return Outcome{Status: UV, Message: fmt.Sprintf("missing published log key %s", art.Manifest.Anchor.LogKey)}
+	}
+	sig, err := base64.StdEncoding.DecodeString(art.Anchors.TreeHead.Sig)
+	if err != nil {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("decode tree_head.sig: %v", err)}
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.sig length %d", len(sig))}
+	}
+	msg, err := Canonicalize([]byte(fmt.Sprintf(`{"log":%q,"root":%q,"size":%d}`, art.Anchors.Log, art.Anchors.TreeHead.Root, art.Anchors.TreeHead.Size)))
+	if err != nil {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("canonical tree head: %v", err)}
+	}
+	if !ed25519.Verify(pub, msg, sig) {
+		return Outcome{Status: Fail, Message: "tree_head.sig verification failed"}
+	}
+	return Outcome{Status: Pass, Message: "tree head signature verifies under log key"}
+}
+
+func checkInclusion(art *Artifact) Outcome {
+	if art.Manifest.Anchor == nil {
+		return Outcome{Status: UV, Message: "manifest anchor block is absent"}
+	}
+	if art.AnchorsErr != nil {
+		return Outcome{Status: Fail, Message: art.AnchorsErr.Error()}
+	}
+	if art.Anchors == nil {
+		return Outcome{Status: UV, Message: "anchors.json is absent"}
+	}
+	root, err := decodeHex32(art.Anchors.TreeHead.Root)
+	if err != nil {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.root: %v", err)}
+	}
+	for _, entry := range art.Anchors.Entries {
+		leaf, err := decodeHex32(entry.Leaf)
+		if err != nil {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor %s seq %d leaf: %v", entry.Recorder, entry.Seq, err)}
+		}
+		proof := make([][]byte, 0, len(entry.Proof))
+		for _, item := range entry.Proof {
+			node, err := decodeHex32(item)
+			if err != nil {
+				return Outcome{Status: Fail, Message: fmt.Sprintf("anchor %s seq %d proof: %v", entry.Recorder, entry.Seq, err)}
+			}
+			proof = append(proof, node)
+		}
+		got, err := merkleRootFromProof(leaf, entry.Index, art.Anchors.TreeHead.Size, proof)
+		if err != nil {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor %s seq %d: %v", entry.Recorder, entry.Seq, err)}
+		}
+		if !bytes.Equal(got, root) {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor %s seq %d inclusion root mismatch", entry.Recorder, entry.Seq)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "all inclusion proofs recompute to tree head root"}
+}
+
+func checkAnchorLeaves(art *Artifact) Outcome {
+	if art.Manifest.Anchor == nil {
+		return Outcome{Status: UV, Message: "manifest anchor block is absent"}
+	}
+	if art.AnchorsErr != nil {
+		return Outcome{Status: Fail, Message: art.AnchorsErr.Error()}
+	}
+	if art.Anchors == nil {
+		return Outcome{Status: UV, Message: "anchors.json is absent"}
+	}
+	for _, entry := range art.Anchors.Entries {
+		rec := findRecord(art, entry.Recorder, entry.Run, entry.Seq)
+		if rec == nil {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor mismatch: %s seq %d is missing", entry.Recorder, entry.Seq)}
+		}
+		if got := merkleLeafHex(rec.PayloadRaw); got != strings.ToLower(entry.Leaf) {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor mismatch: %s seq %d leaf=%s anchored=%s", entry.Recorder, entry.Seq, got, entry.Leaf)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "anchored leaves match stored payload bytes"}
+}
+
+func checkUnanchoredWindow(art *Artifact) Outcome {
+	if art.Manifest.Anchor == nil {
+		return Outcome{Status: UV, Message: "manifest anchor block is absent"}
+	}
+	if art.AnchorsErr != nil {
+		return Outcome{Status: Fail, Message: art.AnchorsErr.Error()}
+	}
+	if art.Anchors == nil {
+		return Outcome{Status: UV, Message: "anchors.json is absent"}
+	}
+	latest := map[string]int{}
+	for _, entry := range art.Anchors.Entries {
+		if entry.Seq > latest[entry.Recorder] || latest[entry.Recorder] == 0 {
+			latest[entry.Recorder] = entry.Seq
+		}
+	}
+	var windows []string
+	for _, log := range logsForArtifactRun(art) {
+		head, ok := latest[log.ID]
+		if !ok {
+			continue
+		}
+		for _, rec := range log.Records {
+			if rec.Payload.Seq > head {
+				windows = append(windows, fmt.Sprintf("%s:%d", log.ID, rec.Payload.Seq))
+			}
+		}
+	}
+	if len(windows) > 0 {
+		return Outcome{Status: Pass, Message: "UNANCHORED-WINDOW " + strings.Join(windows, ",")}
+	}
+	return Outcome{Status: Pass, Message: "no records beyond latest anchored seq"}
+}
+
+func checkCounterpartySignatures(art *Artifact) Outcome {
+	if art.Manifest.Counterparty == nil {
+		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	if art.CounterpartyErr != nil {
+		return Outcome{Status: Fail, Message: art.CounterpartyErr.Error()}
+	}
+	if _, ok := art.Keys[strings.ToLower(art.Manifest.Counterparty.Key)]; !ok {
+		return Outcome{Status: UV, Message: fmt.Sprintf("missing published counterparty key %s", art.Manifest.Counterparty.Key)}
+	}
+	if len(art.Counterparty) == 0 {
+		return Outcome{Status: Fail, Message: "no counterparty statements"}
+	}
+	for _, stmt := range art.Counterparty {
+		if stmt.SignatureUV {
+			return Outcome{Status: UV, Message: stmt.SignatureErr.Error()}
+		}
+		if !stmt.SignatureOK {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, firstErr(stmt.SignatureErr, stmt.CanonicalErr))}
+		}
+		if !stmt.CanonicalOK {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, stmt.CanonicalErr)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "all counterparty statements verify"}
+}
+
+func checkCounterpartyBinding(art *Artifact) Outcome {
+	if art.Manifest.Counterparty == nil {
+		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	run := artifactRun(art)
+	nonce := runNonce(art, run)
+	if nonce == "" {
+		return Outcome{Status: Fail, Message: "run open record has no cp_nonce"}
+	}
+	for _, stmt := range art.Counterparty {
+		if stmt.LineErr != nil || stmt.ParseErr != nil || stmt.SignatureUV || !stmt.SignatureOK {
+			return Outcome{Status: UV, Message: "counterparty statements are not verified"}
+		}
+		if stmt.Payload.V != 1 || stmt.Payload.Type != "received" {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, fmt.Errorf("not a v1 received statement"))}
+		}
+		if stmt.Payload.Run != run || stmt.Payload.Nonce != nonce {
+			return Outcome{Status: Fail, Message: counterpartyMsg(stmt, fmt.Errorf("wrong-run: run=%q nonce=%q want run=%q nonce=%q", stmt.Payload.Run, stmt.Payload.Nonce, run, nonce))}
+		}
+	}
+	return Outcome{Status: Pass, Message: "counterparty statements bind to run and nonce"}
+}
+
+func checkCounterpartyAudit(art *Artifact) Outcome {
+	if art.Manifest.Counterparty == nil {
+		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	run := artifactRun(art)
+	nonce := runNonce(art, run)
+	if nonce == "" {
+		return Outcome{Status: UV, Message: "run open record has no cp_nonce"}
+	}
+	flows := stringSet(art.Manifest.Counterparty.Flows)
+	recorded := map[string]bool{}
+	for _, rec := range art.AllRecords() {
+		if rec.Payload.Type == "activity" && rec.Payload.Event != nil && rec.Payload.Event.Dir == "out" && flows[rec.Payload.Event.Class] {
+			recorded[rec.Payload.Event.ID] = true
+		}
+	}
+	confirmed := map[string]bool{}
+	for _, stmt := range art.Counterparty {
+		if stmt.LineErr != nil || stmt.ParseErr != nil || stmt.SignatureUV || !stmt.SignatureOK {
+			return Outcome{Status: UV, Message: "counterparty statements are not verified"}
+		}
+		if stmt.Payload.Run != run || stmt.Payload.Nonce != nonce {
+			return Outcome{Status: UV, Message: "counterparty binding failed; audit not evaluated"}
+		}
+		if !flows[stmt.Payload.Flow] || stmt.Payload.Received == nil {
+			continue
+		}
+		if id := stmt.Payload.Received["event_id"]; id != "" {
+			confirmed[id] = true
+		}
+	}
+	for id := range recorded {
+		if !confirmed[id] {
+			return Outcome{Status: Fail, Message: "recorded-but-unconfirmed " + id}
+		}
+	}
+	for id := range confirmed {
+		if !recorded[id] {
+			return Outcome{Status: Fail, Message: "confirmed-but-unrecorded " + id}
+		}
+	}
+	return Outcome{Status: Pass, Message: "confirmed flows match recorded outbound events"}
+}
+
 func checkR(art *Artifact) (string, Outcome) {
 	activityCount := 0
 	decisionCount := 0
@@ -289,6 +578,10 @@ func computeGrade(res *Result) {
 		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "n", "o"))
 		return
 	}
+	if res.Checks["p"].Status == Fail {
+		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "p"))
+		return
+	}
 	res.Grade = 3
 	if !allPass(res.Checks, "r", "s", "t") {
 		res.Notes = append(res.Notes, firstCap("AEL-4 capped", res.Checks, "r", "s", "t"))
@@ -333,9 +626,213 @@ func retentionAnnotation(r Retention) string {
 	return fmt.Sprintf("%dd/%s", r.PeriodDays, emptyAsUnknown(r.Custody))
 }
 
+func logsForArtifactRun(art *Artifact) []*RecorderLog {
+	run := artifactRun(art)
+	var logs []*RecorderLog
+	for _, log := range art.RecorderLogs {
+		if run == "" || log.Run == run {
+			logs = append(logs, log)
+		}
+	}
+	return logs
+}
+
+func artifactRun(art *Artifact) string {
+	if len(art.Manifest.Runs) > 0 {
+		return art.Manifest.Runs[0]
+	}
+	if len(art.RecorderLogs) > 0 {
+		return art.RecorderLogs[0].Run
+	}
+	return ""
+}
+
+func recorderAEL1(log *RecorderLog) Outcome {
+	if len(log.Records) == 0 {
+		return Outcome{Status: Fail, Message: "no records"}
+	}
+	for i, rec := range log.Records {
+		if rec.SignatureUV {
+			return Outcome{Status: UV, Message: recordMsg(rec, rec.SignatureErr)}
+		}
+		if !rec.SignatureOK || !rec.CanonicalOK {
+			return Outcome{Status: Fail, Message: recordMsg(rec, firstErr(rec.SignatureErr, rec.CanonicalErr))}
+		}
+		if rec.Payload.Seq != i {
+			return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("seq=%d, want %d", rec.Payload.Seq, i))}
+		}
+		if i == 0 {
+			if rec.Payload.Type != "open" || rec.Payload.Prev != zeroPrev || rec.Payload.HMax <= 0 {
+				return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("invalid AEL-1 open"))}
+			}
+			continue
+		}
+		if rec.Payload.Prev != log.Records[i-1].Hash {
+			return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("prev=%s, want %s", rec.Payload.Prev, log.Records[i-1].Hash))}
+		}
+	}
+	hmax := log.Records[0].Payload.HMax
+	htol := log.Records[0].Payload.HTol
+	limit := time.Duration(hmax+htol) * time.Second
+	for i := 1; i < len(log.Records); i++ {
+		prevTS, err := log.Records[i-1].Payload.Time()
+		if err != nil {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i-1], err)}
+		}
+		curTS, err := log.Records[i].Payload.Time()
+		if err != nil {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
+		}
+		if curTS.Sub(prevTS) > limit {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
+		}
+	}
+	closeRec := log.Records[len(log.Records)-1]
+	if closeRec.Payload.Type != "close" || closeRec.Payload.Count != len(log.Records) {
+		return Outcome{Status: Fail, Message: recordMsg(closeRec, fmt.Errorf("invalid close count"))}
+	}
+	if closeRec.Payload.Count < 2 || closeRec.Payload.Head != log.Records[closeRec.Payload.Count-2].Hash {
+		return Outcome{Status: Fail, Message: recordMsg(closeRec, fmt.Errorf("invalid close head"))}
+	}
+	return Outcome{Status: Pass}
+}
+
+func coveredEvents(log *RecorderLog, classes map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, rec := range log.Records {
+		if rec.Payload.Type != "activity" || rec.Payload.Event == nil {
+			continue
+		}
+		if classes[rec.Payload.Event.Class] {
+			out[rec.Payload.Event.ID] = true
+		}
+	}
+	return out
+}
+
+func stringSet(items []string) map[string]bool {
+	out := map[string]bool{}
+	for _, item := range items {
+		out[item] = true
+	}
+	return out
+}
+
+func decodeHex32(s string) ([]byte, error) {
+	raw, err := hex.DecodeString(strings.ToLower(s))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != sha256.Size {
+		return nil, fmt.Errorf("got %d bytes, want %d", len(raw), sha256.Size)
+	}
+	return raw, nil
+}
+
+func merkleRootFromProof(leaf []byte, index, size int, proof [][]byte) ([]byte, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("tree size must be positive")
+	}
+	if index < 0 || index >= size {
+		return nil, fmt.Errorf("index %d outside tree size %d", index, size)
+	}
+	root, used, err := merkleRootFromProofAt(leaf, index, size, proof)
+	if err != nil {
+		return nil, err
+	}
+	if used != len(proof) {
+		return nil, fmt.Errorf("proof has %d extra nodes", len(proof)-used)
+	}
+	return root, nil
+}
+
+func merkleRootFromProofAt(leaf []byte, index, size int, proof [][]byte) ([]byte, int, error) {
+	if size == 1 {
+		return append([]byte(nil), leaf...), 0, nil
+	}
+	split := largestPowerOfTwoLessThan(size)
+	if index < split {
+		left, used, err := merkleRootFromProofAt(leaf, index, split, proof)
+		if err != nil {
+			return nil, 0, err
+		}
+		if used >= len(proof) {
+			return nil, 0, fmt.Errorf("proof is missing right sibling")
+		}
+		return merkleNode(left, proof[used]), used + 1, nil
+	}
+	right, used, err := merkleRootFromProofAt(leaf, index-split, size-split, proof)
+	if err != nil {
+		return nil, 0, err
+	}
+	if used >= len(proof) {
+		return nil, 0, fmt.Errorf("proof is missing left sibling")
+	}
+	return merkleNode(proof[used], right), used + 1, nil
+}
+
+func merkleLeafHex(raw []byte) string {
+	sum := sha256.Sum256(append([]byte{0x00}, raw...))
+	return hex.EncodeToString(sum[:])
+}
+
+func merkleNode(left, right []byte) []byte {
+	buf := make([]byte, 0, 1+len(left)+len(right))
+	buf = append(buf, 0x01)
+	buf = append(buf, left...)
+	buf = append(buf, right...)
+	sum := sha256.Sum256(buf)
+	return sum[:]
+}
+
+func largestPowerOfTwoLessThan(n int) int {
+	p := 1
+	for p<<1 < n {
+		p <<= 1
+	}
+	return p
+}
+
+func findRecord(art *Artifact, recorder, run string, seq int) *Record {
+	for _, log := range art.RecorderLogs {
+		if log.ID != recorder || log.Run != run {
+			continue
+		}
+		for _, rec := range log.Records {
+			if rec.Payload.Seq == seq {
+				return rec
+			}
+		}
+	}
+	return nil
+}
+
+func runNonce(art *Artifact, run string) string {
+	nonces := map[string]bool{}
+	for _, log := range art.RecorderLogs {
+		if log.Run != run || len(log.Records) == 0 {
+			continue
+		}
+		if log.Records[0].Payload.Type == "open" && log.Records[0].Payload.CPNonce != "" {
+			nonces[log.Records[0].Payload.CPNonce] = true
+		}
+	}
+	for nonce := range nonces {
+		return nonce
+	}
+	return ""
+}
+
 func recordMsg(rec *Record, err error) string {
 	if err == nil {
 		return fmt.Sprintf("%s:%d", rec.File, rec.LineNo)
 	}
 	return fmt.Sprintf("%s:%d: %v", rec.File, rec.LineNo, err)
+}
+
+func counterpartyMsg(stmt *CounterpartyStatement, err error) string {
+	if err == nil {
+		return fmt.Sprintf("%s:%d", stmt.File, stmt.LineNo)
+	}
+	return fmt.Sprintf("%s:%d: %v", stmt.File, stmt.LineNo, err)
 }

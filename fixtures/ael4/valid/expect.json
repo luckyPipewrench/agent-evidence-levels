@@ -1,0 +1,11 @@
+{
+  "grade": 4,
+  "r": "+R",
+  "must": {
+    "R": "PASS",
+    "r": "PASS",
+    "s": "PASS",
+    "t": "PASS"
+  },
+  "note": ""
+}

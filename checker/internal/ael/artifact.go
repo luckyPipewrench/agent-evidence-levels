@@ -56,6 +56,53 @@ type CounterpartyDecl struct {
 	Key   string   `json:"key"`
 }
 
+type Anchors struct {
+	Log      string        `json:"log"`
+	TreeHead TreeHead      `json:"tree_head"`
+	Entries  []AnchorEntry `json:"entries"`
+}
+
+type TreeHead struct {
+	Size int    `json:"size"`
+	Root string `json:"root"`
+	Sig  string `json:"sig"`
+}
+
+type AnchorEntry struct {
+	Recorder string   `json:"recorder"`
+	Run      string   `json:"run"`
+	Seq      int      `json:"seq"`
+	Leaf     string   `json:"leaf"`
+	Index    int      `json:"index"`
+	Proof    []string `json:"proof"`
+}
+
+type CounterpartyPayload struct {
+	V        int               `json:"v"`
+	Type     string            `json:"type"`
+	Run      string            `json:"run"`
+	Flow     string            `json:"flow"`
+	Nonce    string            `json:"nonce"`
+	Received map[string]string `json:"received,omitempty"`
+	None     bool              `json:"none,omitempty"`
+}
+
+type CounterpartyStatement struct {
+	Line         string
+	File         string
+	LineNo       int
+	PayloadRaw   []byte
+	Signature    []byte
+	Payload      CounterpartyPayload
+	LineErr      error
+	ParseErr     error
+	CanonicalErr error
+	CanonicalOK  bool
+	SignatureOK  bool
+	SignatureUV  bool
+	SignatureErr error
+}
+
 type RecorderLog struct {
 	ID      string
 	Run     string
@@ -65,17 +112,22 @@ type RecorderLog struct {
 }
 
 type Artifact struct {
-	Dir            string
-	KeysDir        string
-	ManifestRaw    []byte
-	Manifest       Manifest
-	ManifestErr    error
-	ManifestCanon  bool
-	Keys           map[string]ed25519.PublicKey
-	RecorderLogs   []*RecorderLog
-	Policies       map[string]*PolicyDoc
-	PolicyRaw      map[string][]byte
-	PolicyLoadErrs map[string]error
+	Dir             string
+	KeysDir         string
+	ManifestRaw     []byte
+	Manifest        Manifest
+	ManifestErr     error
+	ManifestCanon   bool
+	Keys            map[string]ed25519.PublicKey
+	RecorderLogs    []*RecorderLog
+	Anchors         *Anchors
+	AnchorsRaw      []byte
+	AnchorsErr      error
+	Counterparty    []*CounterpartyStatement
+	CounterpartyErr error
+	Policies        map[string]*PolicyDoc
+	PolicyRaw       map[string][]byte
+	PolicyLoadErrs  map[string]error
 }
 
 func LoadArtifact(dir, keysDir string) (*Artifact, error) {
@@ -124,6 +176,8 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	if err := art.loadPolicies(); err != nil {
 		return nil, err
 	}
+	art.loadAnchors()
+	art.loadCounterparty()
 	return art, nil
 }
 
@@ -218,6 +272,132 @@ func (a *Artifact) loadPolicies() error {
 		a.Policies[name] = pol
 	}
 	return nil
+}
+
+func (a *Artifact) loadAnchors() {
+	if a.Manifest.Anchor == nil {
+		return
+	}
+	path, err := safeArtifactPath(a.Dir, a.Manifest.Anchor.File)
+	if err != nil {
+		a.AnchorsErr = err
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		a.AnchorsErr = err
+		return
+	}
+	a.AnchorsRaw = raw
+	canon, err := Canonicalize(raw)
+	if err != nil {
+		a.AnchorsErr = fmt.Errorf("anchors canonicalize: %w", err)
+		return
+	}
+	if string(canon) != string(raw) {
+		a.AnchorsErr = fmt.Errorf("anchors.json is not canonical")
+		return
+	}
+	var anchors Anchors
+	if err := json.Unmarshal(raw, &anchors); err != nil {
+		a.AnchorsErr = err
+		return
+	}
+	a.Anchors = &anchors
+}
+
+func (a *Artifact) loadCounterparty() {
+	if a.Manifest.Counterparty == nil {
+		return
+	}
+	path, err := safeArtifactPath(a.Dir, a.Manifest.Counterparty.File)
+	if err != nil {
+		a.CounterpartyErr = err
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		a.CounterpartyErr = err
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for lineNo := 1; sc.Scan(); lineNo++ {
+		line := strings.TrimRight(sc.Text(), "\r")
+		if line == "" {
+			continue
+		}
+		stmt := parseCounterpartyLine(line, a.Manifest.Counterparty.File, lineNo)
+		stmt.Verify(a.Keys, strings.ToLower(a.Manifest.Counterparty.Key))
+		a.Counterparty = append(a.Counterparty, stmt)
+	}
+	if err := sc.Err(); err != nil {
+		a.CounterpartyErr = fmt.Errorf("scan counterparty %s: %w", a.Manifest.Counterparty.File, err)
+	}
+}
+
+func safeArtifactPath(root, rel string) (string, error) {
+	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "..") {
+		return "", fmt.Errorf("unsafe artifact file path %q", rel)
+	}
+	return filepath.Join(root, rel), nil
+}
+
+func parseCounterpartyLine(line, file string, lineNo int) *CounterpartyStatement {
+	stmt := &CounterpartyStatement{Line: line, File: file, LineNo: lineNo}
+	if !compactLineRE.MatchString(line) {
+		stmt.LineErr = fmt.Errorf("malformed compact counterparty line")
+		return stmt
+	}
+	parts := strings.Split(line, ".")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		stmt.LineErr = fmt.Errorf("decode payload: %w", err)
+		return stmt
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		stmt.LineErr = fmt.Errorf("decode signature: %w", err)
+		return stmt
+	}
+	stmt.PayloadRaw = payload
+	stmt.Signature = sig
+	if err := json.Unmarshal(payload, &stmt.Payload); err != nil {
+		stmt.ParseErr = err
+	}
+	return stmt
+}
+
+func (s *CounterpartyStatement) Verify(keys map[string]ed25519.PublicKey, fp string) {
+	if s.LineErr != nil || s.ParseErr != nil {
+		s.SignatureErr = firstErr(s.LineErr, s.ParseErr)
+		return
+	}
+	pub, ok := keys[strings.ToLower(fp)]
+	if !ok {
+		s.SignatureUV = true
+		s.SignatureErr = fmt.Errorf("missing published counterparty key %s", fp)
+		return
+	}
+	if len(s.Signature) != ed25519.SignatureSize {
+		s.SignatureErr = fmt.Errorf("signature length %d", len(s.Signature))
+		return
+	}
+	if !ed25519.Verify(pub, s.PayloadRaw, s.Signature) {
+		s.SignatureErr = fmt.Errorf("counterparty signature verification failed")
+		return
+	}
+	s.SignatureOK = true
+	canon, err := Canonicalize(s.PayloadRaw)
+	if err != nil {
+		s.CanonicalErr = err
+		return
+	}
+	if string(canon) != string(s.PayloadRaw) {
+		s.CanonicalErr = fmt.Errorf("counterparty payload is not canonical")
+		return
+	}
+	s.CanonicalOK = true
 }
 
 func (a *Artifact) AllRecords() []*Record {
