@@ -109,12 +109,31 @@ missing tail evident.
 }
 ```
 
-The manifest is a table of contents. The checker trusts nothing in it that a signature does not
-corroborate. `claimed_rung` is compared against the checker's **independently computed** rung.
-`coverage`, `custody`, `retention` are operator **declarations** the checker echoes as annotations.
-The custody facts the checker proves are limited to key separation: AEL-2 recorders sign under
-**different** keys, AEL-3 `anchor.log_key` differs from recorder keys, and AEL-4
-`counterparty.key` differs from recorder keys.
+### Trust model: the manifest is attacker-controlled
+
+The manifest is a table of contents and an operator declaration. The checker treats it as
+attacker-controlled input: every manifest field used as cryptographic evidence for a grade-affecting
+check must be corroborated by a signature.
+
+Corroborated fields:
+
+- Recorder identity is established from the records themselves: every record in a recorder log must
+  verify under the same `payload.key`. If manifest `recorders[].key` is non-empty, it must equal that
+  verified signing key.
+- `anchor.log_key` is used only after `anchors.tree_head.sig` verifies under that key.
+- `counterparty.key` is used only after the counterparty statements verify under that key.
+
+Pure declarations:
+
+- `coverage`, `custody`, and `retention` are echoed as annotations, not proven.
+- `correspondence.classes` and `counterparty.flows` declare the audited scope. Empty scope is UV,
+  because no omission or confirmation claim can be checked, but a non-empty scope still does not
+  prove that the declared scope is complete.
+- `claimed_rung` is compared against the checker's **independently computed** rung.
+
+The custody facts the checker proves are limited to verified key separation: AEL-2 recorders sign
+under **different** verified recorder keys, AEL-3 `anchor.log_key` differs from verified recorder
+keys, and AEL-4 `counterparty.key` differs from verified recorder keys.
 
 ## 6. anchors.json (AEL-3, canonical JSON)
 

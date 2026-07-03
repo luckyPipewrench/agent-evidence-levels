@@ -244,13 +244,13 @@ func checkTwoRecorders(art *Artifact) Outcome {
 	if len(logs) < 2 {
 		return Outcome{Status: Fail, Message: "fewer than two recorders on the run"}
 	}
-	for _, log := range logs[:2] {
+	for _, log := range logs {
 		if out := recorderAEL1(log); out.Status != Pass {
 			out.Message = fmt.Sprintf("%s is not independently AEL-1: %s", log.ID, out.Message)
 			return out
 		}
 	}
-	return Outcome{Status: Pass, Message: "two recorders independently satisfy AEL-1"}
+	return Outcome{Status: Pass, Message: "all recorders independently satisfy AEL-1"}
 }
 
 func checkKeysDiffer(art *Artifact) Outcome {
@@ -258,18 +258,30 @@ func checkKeysDiffer(art *Artifact) Outcome {
 	if len(logs) < 2 {
 		return Outcome{Status: UV, Message: "need two recorders to compare key custody"}
 	}
-	if logs[0].Key == "" || logs[1].Key == "" {
-		return Outcome{Status: UV, Message: "recorder key fingerprint is missing"}
+	keys := map[string]string{}
+	for _, log := range logs {
+		key, out := verifiedRecorderKey(log)
+		if out.Status != Pass {
+			return out
+		}
+		keys[log.ID] = key
 	}
-	if logs[0].Key == logs[1].Key {
-		return Outcome{Status: Fail, Message: fmt.Sprintf("recorders %s and %s use the same key %s", logs[0].ID, logs[1].ID, logs[0].Key)}
+	for i := 0; i < len(logs); i++ {
+		for j := i + 1; j < len(logs); j++ {
+			if keys[logs[i].ID] == keys[logs[j].ID] {
+				return Outcome{Status: Fail, Message: fmt.Sprintf("recorders %s and %s use the same verified signing key %s", logs[i].ID, logs[j].ID, keys[logs[i].ID])}
+			}
+		}
 	}
-	return Outcome{Status: Pass, Message: "recorder key fingerprints differ"}
+	return Outcome{Status: Pass, Message: "verified recorder signing keys differ"}
 }
 
 func checkCrossAudit(art *Artifact) Outcome {
 	if art.Manifest.Correspondence == nil {
-		return Outcome{Status: UV, Message: "manifest correspondence block is absent"}
+		return Outcome{Status: UV, Message: "no covered event classes declared; omission-detection unverifiable"}
+	}
+	if len(art.Manifest.Correspondence.Classes) == 0 {
+		return Outcome{Status: UV, Message: "no covered event classes declared; omission-detection unverifiable"}
 	}
 	if art.Manifest.Correspondence.Match != "id" {
 		return Outcome{Status: UV, Message: fmt.Sprintf("unsupported correspondence match %q", art.Manifest.Correspondence.Match)}
@@ -279,16 +291,25 @@ func checkCrossAudit(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "need two recorders for cross-audit"}
 	}
 	classes := stringSet(art.Manifest.Correspondence.Classes)
-	left := coveredEvents(logs[0], classes)
-	right := coveredEvents(logs[1], classes)
-	for id := range left {
-		if _, ok := right[id]; !ok {
-			return Outcome{Status: Fail, Message: fmt.Sprintf("one-sided event %s present on %s absent from %s", id, logs[0].ID, logs[1].ID)}
+	covered := map[string]map[string]bool{}
+	events := map[string]bool{}
+	for _, log := range logs {
+		covered[log.ID] = coveredEvents(log, classes)
+		for id := range covered[log.ID] {
+			events[id] = true
 		}
 	}
-	for id := range right {
-		if _, ok := left[id]; !ok {
-			return Outcome{Status: Fail, Message: fmt.Sprintf("one-sided event %s present on %s absent from %s", id, logs[1].ID, logs[0].ID)}
+	for id := range events {
+		var present, absent []string
+		for _, log := range logs {
+			if covered[log.ID][id] {
+				present = append(present, log.ID)
+			} else {
+				absent = append(absent, log.ID)
+			}
+		}
+		if len(absent) > 0 {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("one-sided event %s present on %s absent from %s", id, strings.Join(present, ","), strings.Join(absent, ","))}
 		}
 	}
 	return Outcome{Status: Pass, Message: "covered event ids match across recorders"}
@@ -432,11 +453,15 @@ func checkLogKeyIndependent(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "manifest anchor.log_key is absent"}
 	}
 	for _, log := range logsForArtifactRun(art) {
-		if strings.ToLower(log.Key) == logKey {
+		recorderKey, out := verifiedRecorderKey(log)
+		if out.Status != Pass {
+			return out
+		}
+		if recorderKey == logKey {
 			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor log key %s is also recorder %s key", logKey, log.ID)}
 		}
 	}
-	return Outcome{Status: Pass, Message: "anchor log key differs from recorder keys"}
+	return Outcome{Status: Pass, Message: "anchor log key differs from verified recorder signing keys"}
 }
 
 func checkCounterpartySignatures(art *Artifact) Outcome {
@@ -502,6 +527,9 @@ func checkCounterpartyAudit(art *Artifact) Outcome {
 	if art.CounterpartyMissing {
 		return Outcome{Status: UV, Message: "counterparty.jsonl is absent"}
 	}
+	if len(art.Manifest.Counterparty.Flows) == 0 {
+		return Outcome{Status: UV, Message: "no confirmed flows declared"}
+	}
 	run := artifactRun(art)
 	nonce := runNonce(art, run)
 	if nonce == "" {
@@ -551,11 +579,15 @@ func checkCounterpartyKeyIndependent(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "manifest counterparty.key is absent"}
 	}
 	for _, log := range logsForArtifactRun(art) {
-		if strings.ToLower(log.Key) == counterpartyKey {
+		recorderKey, out := verifiedRecorderKey(log)
+		if out.Status != Pass {
+			return out
+		}
+		if recorderKey == counterpartyKey {
 			return Outcome{Status: Fail, Message: fmt.Sprintf("counterparty key %s is also recorder %s key", counterpartyKey, log.ID)}
 		}
 	}
-	return Outcome{Status: Pass, Message: "counterparty key differs from recorder keys"}
+	return Outcome{Status: Pass, Message: "counterparty key differs from verified recorder signing keys"}
 }
 
 func checkR(art *Artifact) (string, Outcome) {
@@ -742,6 +774,36 @@ func recorderAEL1(log *RecorderLog) Outcome {
 		return Outcome{Status: Fail, Message: recordMsg(closeRec, fmt.Errorf("invalid close head"))}
 	}
 	return Outcome{Status: Pass}
+}
+
+func verifiedRecorderKey(log *RecorderLog) (string, Outcome) {
+	if len(log.Records) == 0 {
+		return "", Outcome{Status: Fail, Message: fmt.Sprintf("%s has no records; recorder signing key is not established", log.ID)}
+	}
+	var key string
+	for _, rec := range log.Records {
+		if rec.SignatureUV {
+			return "", Outcome{Status: UV, Message: recordMsg(rec, rec.SignatureErr)}
+		}
+		if !rec.SignatureOK {
+			return "", Outcome{Status: Fail, Message: recordMsg(rec, firstErr(rec.SignatureErr, fmt.Errorf("record signature is not verified")))}
+		}
+		recKey := strings.ToLower(rec.Payload.Key)
+		if recKey == "" {
+			return "", Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("record key fingerprint is empty"))}
+		}
+		if key == "" {
+			key = recKey
+			continue
+		}
+		if recKey != key {
+			return "", Outcome{Status: Fail, Message: fmt.Sprintf("recorder %s records carry differing signing keys %s and %s", log.ID, key, recKey)}
+		}
+	}
+	if log.Key != "" && strings.ToLower(log.Key) != key {
+		return "", Outcome{Status: Fail, Message: fmt.Sprintf("recorder %s manifest declares key %s but records are signed by %s", log.ID, log.Key, key)}
+	}
+	return key, Outcome{Status: Pass}
 }
 
 func coveredEvents(log *RecorderLog, classes map[string]bool) map[string]bool {

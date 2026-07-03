@@ -52,21 +52,21 @@ Per rung: what the artifact MUST contain; what the checker MUST demonstrate (eve
 
 ### AEL-2: Cross-domain omission-evident
 
-**Artifact MUST add:** (a) records from a second recorder observing the same boundary, itself meeting AEL-1, signing under a key never co-resident with the first recorder's key, with the custody separation declared (different process and host at minimum; different operator where claimed); (b) a correspondence rule: the event classes that must appear in both records, and the identifiers that match them; (c) both record sets in the artifact.
+**Artifact MUST add:** (a) records from a second recorder observing the same boundary, itself meeting AEL-1, with every recorder's records signed under a verified recorder signing key and the custody separation declared by the operator (different process and host at minimum; different operator where claimed); (b) a correspondence rule: the event classes that must appear in all recorder records, and the identifiers that match them; (c) all record sets in the artifact.
 
-**Checker MUST demonstrate:** AEL-1 on each record set independently; that the two verification keys differ; a cross-audit that reports every covered event present on one side and absent from the other (fixture: delete one side's copy of an event; the checker must flag the discrepancy).
+**Checker MUST demonstrate:** AEL-1 on each record set independently; that each recorder identity is bound to the records' verified signatures, including rejection when a non-empty manifest recorder key disagrees with the key that actually signed that recorder's records; that every pair of verified recorder signing keys differs; and a cross-audit that reports every covered event present on one recorder and absent from another (fixture: delete one side's copy of an event; the checker must flag the discrepancy). If no covered event classes are declared, omission detection is unverifiable and AEL-2 is not earned.
 
 This is the first rung at which "did anything cross the boundary unrecorded" becomes a checkable question, and only for the covered event classes, and only where mediation coverage is enforced-total, so that a second observer at a lower layer (for example, a kernel-level egress observer) sees attempts the mediating recorder never saw.
 
-**MAY assert:** "Omission of a covered event from either record is detectable, unless both key custodians collude or both observers share the same blind spot."
+**MAY assert:** "Omission of a covered event from any recorder's record is detectable, unless the verified recorder keyholders collude or the observers share the same blind spot."
 
-**MUST NOT assert:** an unqualified "no bypass occurred" (the correct form: "neither recorder observed a covered event that the other omitted"); anything about uncovered event classes; independence beyond the declared custody. Two recorders under one operator detect a compromised or misbehaving recorder; they do not constrain the operator who holds both keys.
+**MUST NOT assert:** an unqualified "no bypass occurred" (the correct form: "no recorder observed a covered event that another recorder omitted"); anything about uncovered event classes; organizational independence beyond the declared custody. Two recorders under one operator detect a compromised or misbehaving recorder; they do not constrain the operator who controls both keyholders.
 
 ### AEL-3: Externally anchored
 
-**Artifact MUST add:** (a) chain heads and run-close commitments registered, at a declared cadence, in an append-only log operated by a party independent of both operator and vendor, where the log supports inclusion proofs and consistency proofs; (b) the inclusion proofs; (c) the log's identity and verification key, published.
+**Artifact MUST add:** (a) chain heads and run-close commitments registered, at a declared cadence, in an append-only log declared by the operator as externally operated, where the log supports inclusion proofs and consistency proofs; (b) the inclusion proofs; (c) the log's identity and verification key, published.
 
-**Checker MUST demonstrate:** AEL-2 demonstrations; that the log verification key differs from the recorder signing keys; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
+**Checker MUST demonstrate:** AEL-2 demonstrations; that `anchor.log_key` actually signed the tree head; that this verified log key differs from every verified recorder signing key; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
 
 **MAY assert:** "History up to each anchored head cannot be rewritten, retroactively edited, or presented in two conflicting versions without detection by any holder of the anchor references."
 
@@ -74,13 +74,13 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 ### AEL-4: Counterparty-confirmed
 
-**Artifact MUST add:** (a) for a declared set of confirmed flows, signed statements from the destination party, or from an observer at the destination boundary, stating what it received, including "nothing," under keys independent of operator and vendor; (b) run binding: each statement carries the run identifier or nonce it answers, so an all-clear cannot be replayed across runs; (c) a correspondence rule mapping recorded outbound decisions to confirmations.
+**Artifact MUST add:** (a) for a declared set of confirmed flows, signed statements from the destination party, or from an observer at the destination boundary, stating what it received, including "nothing," under a declared counterparty key; (b) run binding: each statement carries the run identifier or nonce it answers, so an all-clear cannot be replayed across runs; (c) a correspondence rule mapping recorded outbound decisions to confirmations.
 
-**Checker MUST demonstrate:** AEL-3 demonstrations; that counterparty keys differ from the recorder signing keys; verification of counterparty statements under counterparty keys; rejection of a statement bound to a different run (fixture: substitute another run's confirmation); a two-way cross-audit flagging recorded-but-unconfirmed and confirmed-but-unrecorded deliveries.
+**Checker MUST demonstrate:** AEL-3 demonstrations; that `counterparty.key` actually signed the counterparty statements; that this verified counterparty key differs from every verified recorder signing key; rejection of a statement bound to a different run (fixture: substitute another run's confirmation); a two-way cross-audit flagging recorded-but-unconfirmed and confirmed-but-unrecorded deliveries. If no confirmed flows are declared, counterparty confirmation is unverifiable and AEL-4 is not earned.
 
-**MAY assert:** "For the confirmed flows, what the destination received is attested by a party outside the operator's trust domain. Fabricating a clean history for those flows requires the counterparty's cooperation."
+**MAY assert:** "For the confirmed flows, what the destination received is attested under a declared counterparty key that is different from the recorder signing keys. Fabricating a clean history for those flows requires cooperation from that counterparty keyholder."
 
-**MUST NOT assert:** anything beyond the confirmed flows; content judgments (receipt of bytes is confirmed; harmlessness is not); confirmation where the counterparty does not participate.
+**MUST NOT assert:** anything beyond the confirmed flows; content judgments (receipt of bytes is confirmed; harmlessness is not); confirmation where the counterparty does not participate; organizational independence beyond the counterparty declaration.
 
 ### 3.6 The R suffix: decision-reproducibility
 
@@ -97,7 +97,7 @@ A single flat grade decomposes into these dimensions. Each rung sets required mi
 | Dimension | Question it answers | Values (weakest first) | Effect |
 |---|---|---|---|
 | Mediation coverage | How much of the subject's action surface is forced through the recorded boundary? | declared-only / partial / mediated-only / enforced-total | Bounds claim scope. Bypass-evidence claims require enforced-total plus AEL-2. |
-| Recorder custody | Whose keys sign, relative to subject and operator? | same-process / same-host / same-operator / independent | AEL-2 requires the declared separation to hold between the two recorders; AEL-4 requires counterparty independence. |
+| Recorder custody | Whose keys sign, relative to subject and operator? | same-process / same-host / same-operator / independent | AEL-2 requires verified recorder signing keys to differ and custody separation to be declared; AEL-4 requires the declared counterparty key to differ from recorder signing keys. |
 | Chain continuity | Are omission, silence, and truncation visible? | none / linked / contiguous + heartbeat + close | Gates AEL-0 and AEL-1. |
 | External anchoring | Can history be rewritten or forked? | none / operator-run log / independent append-only log | Gates AEL-3. |
 | Counterparty independence | Does the far end attest what arrived? | none / partial flows / declared confirmed set | Gates AEL-4. |
@@ -111,13 +111,13 @@ A grade is earned when the reference checker, run by someone other than the prod
 
 ## 6. Limits: what no rung can prove
 
-**The completeness limit.** A record produced inside one trust domain cannot prove its own completeness to anyone outside that domain, against the party holding the domain's signing keys. The keyholder can construct an alternative history, shorter, different, or empty, sign every element of it, heartbeats and close included, and the result passes every internal check. Signed silence proves the silence was signed; it cannot prove the silence was true. AEL is a ladder rather than a checkbox for exactly this reason: rungs 0 and 1 measure internal consistency, which a keyholder can counterfeit wholesale; omission-evidence is bought only with independence, one custodian at a time (a second key domain at AEL-2, an external log at AEL-3, the counterparty at AEL-4), and each purchase covers only what that party can see. No rung is named "complete."
+**The completeness limit.** A record produced inside one trust domain cannot prove its own completeness to anyone outside that domain, against the party holding the domain's signing keys. The keyholder can construct an alternative history, shorter, different, or empty, sign every element of it, heartbeats and close included, and the result passes every internal check. Signed silence proves the silence was signed; it cannot prove the silence was true. AEL is a ladder rather than a checkbox for exactly this reason: rungs 0 and 1 measure internal consistency, which a keyholder can counterfeit wholesale; omission-evidence is bought only with additional signed evidence, one keyholder at a time (a second verified recorder signing key at AEL-2, a signed log tree head at AEL-3, a signed counterparty statement at AEL-4), while organizational independence remains declared by the operator rather than proven by the checker. Each purchase covers only what that signer can see. No rung is named "complete."
 
 **Per-rung limits, restated plainly:**
 
 - **AEL-0** does not see tail truncation, does not see fabrication, and says nothing about completeness.
 - **AEL-1** does not see whole-run deletion, and holds nothing against a dishonest keyholder.
-- **AEL-2** fails against collusion of both custodians, and is blind outside the covered event classes and inside shared blind spots.
+- **AEL-2** fails against collusion of the recorder keyholders, and is blind outside the covered event classes and inside shared blind spots.
 - **AEL-3** does not detect a recorder that lied at record time, never sees never-recorded events, and leaves the window since the last anchor unprotected.
 - **AEL-4** covers only confirmed flows with cooperating counterparties, and confirms receipt, never meaning.
 - **No rung** grades whether decisions were good, whether policy was right, or whether the subject behaved well. AEL grades the evidence, never the conduct.
