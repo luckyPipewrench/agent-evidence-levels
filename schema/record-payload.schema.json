@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-evidence-levels.example/schema/record-payload.schema.json",
+  "title": "AEL record payload (v0.1)",
+  "description": "The canonical JSON payload carried in each base64url(payload).base64url(sig) record line. Signed over its exact canonical bytes. Closed schema: no unknown top-level keys except a reserved opaque 'ext' object (see SPEC.md check w).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "type", "run", "recorder", "key", "seq", "prev", "ts"],
+  "properties": {
+    "v": { "const": 1 },
+    "type": { "enum": ["open", "activity", "heartbeat", "close"] },
+    "run": { "type": "string", "minLength": 1 },
+    "recorder": { "type": "string", "minLength": 1 },
+    "key": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "lowercase hex SHA-256 of the 32-byte Ed25519 public key that signs this recorder's records" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "prev": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "hex SHA-256 of the previous record's payload bytes; 64 zeros at seq 0" },
+    "ts": { "type": "string", "format": "date-time", "description": "RFC3339 UTC; the recorder's signed timeline, not trusted wall-clock time" },
+    "hmax": { "type": "integer", "minimum": 0, "description": "open only: max heartbeat interval seconds; 0 caps the recorder at AEL-0" },
+    "htol": { "type": "integer", "minimum": 0, "description": "open only: heartbeat tolerance seconds" },
+    "cp_nonce": { "type": "string", "description": "open only, AEL-4 runs: per-run nonce bound into counterparty confirmations" },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "id", "dir"],
+      "properties": {
+        "class": { "type": "string" },
+        "id": { "type": "string" },
+        "dir": { "enum": ["out", "in", "internal"] }
+      },
+      "description": "activity only"
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "request_fp", "inputs", "verdict"],
+      "properties": {
+        "policy": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "hex SHA-256 of the canonical policy document" },
+        "request_fp": { "type": "string" },
+        "inputs": { "type": "object", "additionalProperties": { "type": ["string", "integer", "boolean"] } },
+        "verdict": { "enum": ["allow", "block", "defer"] }
+      },
+      "description": "activity only; presence enables the R suffix"
+    },
+    "count": { "type": "integer", "minimum": 2, "description": "close only: total records in this (run,recorder) including open and close" },
+    "head": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "close only: hex SHA-256 of the record at seq=count-2" },
+    "ext": { "type": "object", "description": "reserved opaque forward-compat namespace; never read or graded by the checker" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "open" } } }, "then": { "required": ["hmax", "htol"] } },
+    { "if": { "properties": { "type": { "const": "activity" } } }, "then": { "required": ["event"] } },
+    { "if": { "properties": { "type": { "const": "close" } } }, "then": { "required": ["count", "head"] } }
+  ]
+}

@@ -13,6 +13,8 @@ trusting the vendor or the operator.
 - **`GRADES.md`** — the self-grading registry; the editor's row is first and held to the same rule.
 - **`docs/VERSIONING.md`** — draft stability, compatibility, and donation posture.
 - **`docs/PRIOR-ART.md`** — how AEL relates to existing standards (transparency logs, audit-log and retention standards, evidence-handling), and what it deliberately does not restate.
+- **`docs/EXAMPLE.md`** — a worked end-to-end example: one real artifact from bytes to a grade.
+- **`schema/`** — JSON Schemas for the record payload and manifest, for independent reimplementers.
 - **`CONTRIBUTING.md`** — contribution rules and required validation.
 
 ## Why a checker ships with the spec

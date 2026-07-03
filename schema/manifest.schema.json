@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-evidence-levels.example/schema/manifest.schema.json",
+  "title": "AEL manifest (v0.1)",
+  "description": "The artifact table of contents. Untrusted: the checker trusts nothing here that a signature does not corroborate. Recorder identity is verified from record signatures, not from the declared key; coverage, custody, and retention are operator declarations.",
+  "type": "object",
+  "required": ["ael_format", "runs", "recorders"],
+  "properties": {
+    "ael_format": { "const": 1 },
+    "runs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "recorders": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "run", "file"],
+        "properties": {
+          "id": { "type": "string" },
+          "run": { "type": "string" },
+          "key": { "type": "string", "description": "declared fingerprint; MUST equal the recorder's verified signing key or the artifact fails" },
+          "file": { "type": "string", "description": "path under the artifact dir; no absolute paths or '..'" }
+        }
+      }
+    },
+    "claimed_rung": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "coverage": { "enum": ["declared-only", "partial", "mediated-only", "enforced-total"], "description": "operator declaration; not verified" },
+    "custody": { "enum": ["same-process", "same-host", "same-operator", "independent"], "description": "operator declaration; only key separation is verified" },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "period_days": { "type": "integer", "minimum": 0 },
+        "custody": { "type": "string" }
+      },
+      "description": "operator declaration only; never affects the grade (SPEC.md 3.7)"
+    },
+    "correspondence": {
+      "type": "object",
+      "required": ["classes", "match"],
+      "properties": {
+        "classes": { "type": "array", "items": { "type": "string" } },
+        "match": { "const": "id" }
+      },
+      "description": "AEL-2+; empty classes make cross-audit UV"
+    },
+    "anchor": {
+      "type": "object",
+      "required": ["log", "log_key", "file"],
+      "properties": {
+        "log": { "type": "string" },
+        "log_key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "file": { "type": "string" }
+      },
+      "description": "AEL-3+"
+    },
+    "counterparty": {
+      "type": "object",
+      "required": ["file", "flows", "key"],
+      "properties": {
+        "file": { "type": "string" },
+        "flows": { "type": "array", "items": { "type": "string" } },
+        "key": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "description": "AEL-4+; empty flows make the two-way audit UV"
+    }
+  }
+}

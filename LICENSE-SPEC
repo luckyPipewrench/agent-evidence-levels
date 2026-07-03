@@ -1,0 +1,14 @@
+SPDX-License-Identifier: CC-BY-4.0
+
+SPEC.md and the normative specification text in this repository are licensed under
+the Creative Commons Attribution 4.0 International License (CC BY 4.0). You are free
+to share and adapt the material for any purpose, including commercially, provided you
+give appropriate credit. The full license is at:
+
+    https://creativecommons.org/licenses/by/4.0/legalcode
+
+Attribution: "Agent Evidence Level (AEL) specification", used under CC BY 4.0.
+
+NOTE (v0.1 draft): the full, verbatim CC BY 4.0 legal code is vendored into this file
+before any public release by running `scripts/vendor-licenses.sh`. The notice above is
+the official short form; the full legal code is included at release for completeness.
