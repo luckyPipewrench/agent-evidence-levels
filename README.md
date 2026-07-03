@@ -11,6 +11,8 @@ trusting the vendor or the operator.
 - **`fixtures/`** — the per-rung conformance corpus: one valid artifact per rung plus the perturbed
   artifacts the checker must reject or flag (Apache-2.0).
 - **`GRADES.md`** — the self-grading registry; the editor's row is first and held to the same rule.
+- **`docs/VERSIONING.md`** — draft stability, compatibility, and donation posture.
+- **`CONTRIBUTING.md`** — contribution rules and required validation.
 
 ## Why a checker ships with the spec
 
@@ -49,3 +51,5 @@ v0.1 draft. This repository is vendor-neutral by construction: `SPEC.md` carries
 concrete deployments (including the editor's) are graded in `GRADES.md`. On publication the module
 path and repository owner move to a neutral home; the intended endgame is donation of editorship to
 a neutral foundation once the vocabulary has independent usage.
+
+See `docs/VERSIONING.md` for the draft stability and compatibility policy.
