@@ -136,7 +136,7 @@ func checkClosedSchemas(art *Artifact) Outcome {
 	if sawUV {
 		return Outcome{Status: UV, Message: "closed-schema check requires verified canonical signed payloads"}
 	}
-	return Outcome{Status: Pass, Message: "verified closed-schema objects have no unknown top-level keys outside ext"}
+	return Outcome{Status: Pass, Message: "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"}
 }
 
 func checkByteflipDuty(sig Outcome) Outcome {
@@ -563,9 +563,9 @@ func checkCounterpartyBinding(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "counterparty.jsonl is absent"}
 	}
 	run := artifactRun(art)
-	nonce := runNonce(art, run)
-	if nonce == "" {
-		return Outcome{Status: Fail, Message: "run open record has no cp_nonce"}
+	nonce, nonceOut := runNonce(art, run)
+	if nonceOut.Status != Pass {
+		return nonceOut
 	}
 	statements := counterpartyStatementsForRun(art)
 	if len(statements) == 0 && len(art.Counterparty) > 0 {
@@ -600,9 +600,9 @@ func checkCounterpartyAudit(art *Artifact) Outcome {
 		return Outcome{Status: UV, Message: "no confirmed flows declared"}
 	}
 	run := artifactRun(art)
-	nonce := runNonce(art, run)
-	if nonce == "" {
-		return Outcome{Status: UV, Message: "run open record has no cp_nonce"}
+	nonce, nonceOut := runNonce(art, run)
+	if nonceOut.Status != Pass {
+		return Outcome{Status: UV, Message: nonceOut.Message}
 	}
 	flows := stringSet(art.Manifest.Counterparty.Flows)
 	recorded := map[string]bool{}
@@ -793,9 +793,6 @@ func artifactRuns(art *Artifact) []string {
 			seen[run] = true
 			runs = append(runs, run)
 		}
-	}
-	if len(runs) > 0 {
-		return runs
 	}
 	for _, log := range art.RecorderLogs {
 		if log.Run != "" && !seen[log.Run] {
@@ -1012,20 +1009,30 @@ func findRecord(art *Artifact, recorder, run string, seq int) *Record {
 	return nil
 }
 
-func runNonce(art *Artifact, run string) string {
-	nonces := map[string]bool{}
-	for _, log := range art.RecorderLogs {
+func runNonce(art *Artifact, run string) (string, Outcome) {
+	var nonce string
+	var nonceRecorder string
+	for _, log := range logsForArtifactRun(art) {
 		if log.Run != run || len(log.Records) == 0 {
 			continue
 		}
-		if log.Records[0].Payload.Type == "open" && log.Records[0].Payload.CPNonce != "" {
-			nonces[log.Records[0].Payload.CPNonce] = true
+		open := log.Records[0]
+		if open.Payload.Type != "open" || open.Payload.CPNonce == "" {
+			return "", Outcome{Status: Fail, Message: fmt.Sprintf("%s open record has no cp_nonce", log.ID)}
+		}
+		if nonce == "" {
+			nonce = open.Payload.CPNonce
+			nonceRecorder = log.ID
+			continue
+		}
+		if open.Payload.CPNonce != nonce {
+			return "", Outcome{Status: Fail, Message: fmt.Sprintf("run open records disagree on cp_nonce: %s=%q %s=%q", nonceRecorder, nonce, log.ID, open.Payload.CPNonce)}
 		}
 	}
-	for nonce := range nonces {
-		return nonce
+	if nonce == "" {
+		return "", Outcome{Status: Fail, Message: "run open record has no cp_nonce"}
 	}
-	return ""
+	return nonce, Outcome{Status: Pass}
 }
 
 func counterpartyStatementsForRun(art *Artifact) []*CounterpartyStatement {

@@ -409,10 +409,10 @@ func (s *CounterpartyStatement) Verify(keys map[string]ed25519.PublicKey, fp str
 		return
 	}
 	s.CanonicalOK = true
-	if err := validateClosedObjectSchema(s.PayloadRaw, map[string]bool{
+	if err := validateObjectSchema(s.PayloadRaw, map[string]bool{
 		"v": true, "type": true, "run": true, "flow": true, "nonce": true,
 		"received": true, "none": true, "ext": true,
-	}); err != nil {
+	}, []string{"v", "type", "run", "flow", "nonce"}); err != nil {
 		s.SchemaErr = err
 		return
 	}

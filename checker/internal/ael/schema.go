@@ -19,28 +19,47 @@ func validateRecordPayloadSchema(raw []byte, typ string) error {
 		"v": true, "type": true, "run": true, "recorder": true, "key": true,
 		"seq": true, "prev": true, "ts": true, "ext": true,
 	}
+	required := []string{"v", "type", "run", "recorder", "key", "seq", "prev", "ts"}
 	switch typ {
 	case "open":
 		known["hmax"] = true
 		known["htol"] = true
 		known["cp_nonce"] = true
+		required = append(required, "hmax", "htol")
 	case "activity":
 		known["event"] = true
 		known["decision"] = true
+		required = append(required, "event")
 	case "heartbeat":
 	case "close":
 		known["count"] = true
 		known["head"] = true
+		required = append(required, "count", "head")
 	default:
 		return fmt.Errorf("unknown record type %q", typ)
 	}
-	return validateClosedObjectSchema(raw, known)
+	if err := validateObjectSchema(raw, known, required); err != nil {
+		return err
+	}
+	if typ == "activity" {
+		if err := validateNestedObjectSchema(raw, "event", map[string]bool{
+			"class": true, "id": true, "dir": true,
+		}, []string{"class", "id", "dir"}); err != nil {
+			return err
+		}
+		if err := validateNestedObjectSchema(raw, "decision", map[string]bool{
+			"policy": true, "request_fp": true, "inputs": true, "verdict": true,
+		}, []string{"policy", "request_fp", "inputs", "verdict"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateTreeHeadObjectSchema(raw []byte) error {
-	return validateClosedObjectSchema(raw, map[string]bool{
+	return validateObjectSchema(raw, map[string]bool{
 		"size": true, "root": true, "sig": true, "signed": true, "ext": true,
-	})
+	}, []string{"size", "root", "sig", "signed"})
 }
 
 func validateAnchorSchemas(raw []byte) error {
@@ -58,10 +77,10 @@ func validateAnchorSchemas(raw []byte) error {
 		return fmt.Errorf("tree_head: %w", err)
 	}
 	for i, entry := range root.Entries {
-		if err := validateClosedObjectSchema(entry, map[string]bool{
+		if err := validateObjectSchema(entry, map[string]bool{
 			"recorder": true, "run": true, "seq": true, "leaf": true,
 			"index": true, "proof": true, "ext": true,
-		}); err != nil {
+		}, []string{"recorder", "run", "seq", "leaf", "index", "proof"}); err != nil {
 			return fmt.Errorf("entries[%d]: %w", i, err)
 		}
 	}
@@ -69,9 +88,9 @@ func validateAnchorSchemas(raw []byte) error {
 }
 
 func parseSignedTreeHead(raw []byte) (signedTreeHead, error) {
-	if err := validateClosedObjectSchema(raw, map[string]bool{
+	if err := validateObjectSchema(raw, map[string]bool{
 		"log": true, "root": true, "size": true, "ext": true,
-	}); err != nil {
+	}, []string{"log", "root", "size"}); err != nil {
 		return signedTreeHead{}, err
 	}
 	var head signedTreeHead
@@ -82,9 +101,18 @@ func parseSignedTreeHead(raw []byte) (signedTreeHead, error) {
 }
 
 func validateClosedObjectSchema(raw []byte, known map[string]bool) error {
+	return validateObjectSchema(raw, known, nil)
+}
+
+func validateObjectSchema(raw []byte, known map[string]bool, required []string) error {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return err
+	}
+	for _, key := range required {
+		if _, ok := obj[key]; !ok {
+			return fmt.Errorf("missing required top-level key %q", key)
+		}
 	}
 	for key, val := range obj {
 		if !known[key] {
@@ -93,6 +121,24 @@ func validateClosedObjectSchema(raw []byte, known map[string]bool) error {
 		if key == "ext" && !isJSONObject(val) {
 			return fmt.Errorf("ext must be an object")
 		}
+	}
+	return nil
+}
+
+func validateNestedObjectSchema(raw []byte, field string, known map[string]bool, required []string) error {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return err
+	}
+	val, ok := obj[field]
+	if !ok {
+		return nil
+	}
+	if !isJSONObject(val) {
+		return fmt.Errorf("%s must be an object", field)
+	}
+	if err := validateObjectSchema(val, known, required); err != nil {
+		return fmt.Errorf("%s: %w", field, err)
 	}
 	return nil
 }

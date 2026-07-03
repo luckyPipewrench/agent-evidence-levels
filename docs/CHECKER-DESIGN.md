@@ -13,9 +13,9 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **c `byteflip`** — a record with any payload byte changed must fail `a` (verifier rejects).
 - **d `transpose`** — two records swapped must break the `prev`/`seq` chain (reject).
 - **e `interior_del`** — an interior record removed must break `prev`/`seq` (reject).
-- **w `schema`** — verified closed-schema objects reject unknown top-level keys, except for the
-  reserved opaque `ext` object. This covers record payloads, counterparty payloads, anchor entries,
-  and `tree_head`.
+- **w `schema`** — verified closed-schema objects require the fields defined for their type and
+  reject unknown top-level keys, except for the reserved opaque `ext` object. This covers record
+  payloads, counterparty payloads, anchor entries, and `tree_head`.
 
 ### AEL-1 (gap/truncation-evident within a run)
 - **f `open`** — recorder has an `open` at seq 0 with `hmax>0` (else caps at AEL-0).
@@ -40,7 +40,9 @@ Every check yields `PASS` | `FAIL` | `UV`.
 
 ### AEL-4 (counterparty-confirmed)
 - **r `cp_sig`** — every counterparty statement verifies under `counterparty.key` (absent → UV).
-- **s `cp_bind`** — statement `run` == artifact run AND `nonce` == run `open.cp_nonce` (mismatch → FAIL, wrong-run), and exactly one of non-empty `received.event_id` or `none:true` is present.
+- **s `cp_bind`** — all recorder `open.cp_nonce` values for the run are present and agree; statement
+  `run` == artifact run AND `nonce` == that run nonce (mismatch → FAIL, wrong-run); and exactly one
+  of non-empty `received.event_id` or `none:true` is present.
 - **t `cp_audit`** — for non-empty `flows`, two-way match of `dir:out` activities to `received.event_id`: report `recorded-but-unconfirmed` and `confirmed-but-unrecorded` (unresolved → FAIL). Empty flows → UV because no confirmation scope is declared.
 - **v `cp_key_independent`** — after `r` verifies statements under `counterparty.key`, that verified counterparty key must differ from every verified recorder signing key on the run (same key → FAIL).
 
@@ -50,10 +52,10 @@ Every check yields `PASS` | `FAIL` | `UV`.
 
 ## 2. Rung computation (minimum over required sub-dimensions)
 
-Per recorder then per run, compute each sub-dimension. The checker evaluates each `manifest.runs`
-entry independently and emits one result per run; grade = highest n with AEL-0..n all satisfied
-(cumulative) for that run. A required check that FAILs caps the grade below and reports FAIL; one
-that is UV caps below and reports UV (distinct).
+Per recorder then per run, compute each sub-dimension. The checker evaluates each declared
+`manifest.runs` entry and each run observed in recorder files independently, then emits one result per
+run; grade = highest n with AEL-0..n all satisfied (cumulative) for that run. A required check that
+FAILs caps the grade below and reports FAIL; one that is UV caps below and reports UV (distinct).
 
 | Rung | Required (all must PASS) |
 |---|---|
@@ -103,6 +105,7 @@ asserts each case matches its `expect.json`.
 | `ael1/no_close` | AEL-0 | j | OPEN/ABNORMAL-END, grade caps at 0 |
 | `ael1/unknown_field_rejected` | — | w | unknown signed top-level key FAIL |
 | `ael1/ext_field_accepted` | AEL-1 | — | reserved `ext` object ignored for grading |
+| `ael1/required_event_missing` | — | w | required `activity.event` hidden under `ext` does not satisfy schema; check w FAIL |
 | `ael2/valid` | AEL-2 | — | grade 2 |
 | `ael2/manifest_key_forgery` | — | l | one signing key signs both recorders while manifest declares different recorder keys; check l FAIL, grade caps at 1 |
 | `ael2/empty_classes` | — | m (UV) | empty `correspondence.classes` is **UV**, grade caps at 1 |
@@ -123,6 +126,7 @@ asserts each case matches its `expect.json`.
 | `ael4/counterparty_none` | AEL-4 | — | signed `none:true` all-clear path grades 4 |
 | `ael4/counterparty_empty_statement` | — | s | neither `received` nor `none:true`; check s FAIL |
 | `ael4/wrong_run_confirmation` | — | s | check s FAIL |
+| `ael4/cp_nonce_mismatch` | — | s | recorder open records disagree on `cp_nonce`; check s FAIL |
 | `ael4/no_counterparty_file` | AEL-3 | r/s/t (UV) | missing counterparty proof is **UV**, not artifact FAIL |
 | `ael4/unrecorded_delivery` | — | t | check t FAIL |
 | `ael4/empty_flows` | — | t (UV) | empty `counterparty.flows` is **UV**, grade caps at 3 |
@@ -130,6 +134,7 @@ asserts each case matches its `expect.json`.
 | `r/valid` | (any) | — | +R |
 | `r/verdict_mismatch` | — | R2 | r fail |
 | `multi_run/mixed` | AEL-2 / AEL-0 | per-run grading | run A grades AEL-2; run B missing close grades AEL-0 |
+| `multi_run/manifest_omits_bad_run` | AEL-2 / AEL-0 | per-run grading | run B is still emitted and capped even when omitted from `manifest.runs` |
 
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
 expected is the proof the standard is earned, not asserted.

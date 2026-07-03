@@ -46,7 +46,7 @@ Real output (abridged):
 a  PASS all signatures verify over stored payload bytes
 b  PASS all verified payloads are canonical
 d  PASS presented record order is hash-linked
-w  PASS verified closed-schema objects have no unknown top-level keys outside ext
+w  PASS verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext
 f  PASS each recorder opens with hmax>0
 g  PASS sequence numbers are contiguous
 h  PASS record spacing is within hmax+htol

@@ -43,10 +43,11 @@ Each `.jsonl` line is:
   algorithm (§3) and require **byte-equality** with `payload_bytes`. Inequality or duplicate key →
   FAIL (non-canonical). This makes any non-canonical or key-duplicated payload fail even though its
   signature is valid.
-- **Closed-schema enforcement (separate, after canonicality):** signed payload objects reject
-  unrecognized top-level keys, except for a single reserved `ext` object. `ext`, when present, MUST
-  be a JSON object. The checker MUST treat `ext` as opaque signed forward-compatibility space: it
-  MUST NOT read, grade from, or assign semantics to anything under `ext`.
+- **Closed-schema enforcement (separate, after canonicality):** signed payload objects require the
+  fields defined for their type and reject unrecognized top-level keys, except for a single reserved
+  `ext` object. `ext`, when present, MUST be a JSON object. The checker MUST treat `ext` as opaque
+  signed forward-compatibility space: it MUST NOT read, grade from, or assign semantics to anything
+  under `ext`.
 
 ## 3. Canonical JSON
 
@@ -92,10 +93,10 @@ Type-specific:
 **Order commitment (AEL-0):** for `seq>0`, `prev` MUST equal hex SHA-256 of the `payload_bytes` at
 `seq-1`. Transposition and interior deletion both break this chain (and/or seq contiguity).
 
-Record payloads are closed-schema objects. Unknown top-level keys are nonconforming → FAIL. The only
-reserved top-level extension point is `ext`, and `ext` MUST be an object. This satisfies the
-versioning rule that additive extension fields are versioned and namespaced before checker or
-downstream use.
+Record payloads are closed-schema objects. Missing required fields or unknown top-level keys are
+nonconforming → FAIL. The only reserved top-level extension point is `ext`, and `ext` MUST be an
+object. This satisfies the versioning rule that additive extension fields are versioned and
+namespaced before checker or downstream use.
 
 **Why tail-truncation is silent at AEL-0:** with no `close` committing to `count`, dropping the last
 k records leaves a shorter still-valid chain. AEL-1's signed `close` (count + head) is what makes the
@@ -138,7 +139,8 @@ Pure declarations:
 - `correspondence.classes` and `counterparty.flows` declare the audited scope. Empty scope is UV,
   because no omission or confirmation claim can be checked, but a non-empty scope still does not
   prove that the declared scope is complete.
-- `claimed_rung` is compared against the checker's **independently computed** rung.
+- `claimed_rung` is an operator declaration. The checker computes and reports the earned rung
+  independently; `claimed_rung` is never used to raise or lower the grade.
 
 The custody facts the checker proves are limited to verified key separation: AEL-2 recorders sign
 under **different** verified recorder keys, AEL-3 `anchor.log_key` differs from verified recorder
@@ -214,8 +216,9 @@ Per check: `PASS` | `FAIL` | `UV`. `FAIL` = ran and property violated (tamper/no
 artifact. A run with no `close` is `OPEN/ABNORMAL-END` (first-class, distinct from PASS/FAIL).
 
 Final grade lines are per run: `run <id>: AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor:
-<a>; retention: <r>)`, computed independently for each `manifest.runs` entry as the **minimum over
-required sub-dimensions**, cumulative from AEL-0. A single-run artifact emits one grade line. A
-multi-run artifact emits one grade line per run; no single headline grade may hide a degraded run. For
-each rung above each run's grade, the checker prints the dimension that capped it and whether it was
-FAIL or UV. Machine-readable output is `{"runs":[...]}`, with one result object per run.
+<a>; retention: <r>)`, computed independently for every declared run and every run observed in
+recorder files as the **minimum over required sub-dimensions**, cumulative from AEL-0. A single-run
+artifact emits one grade line. A multi-run artifact emits one grade line per run; no manifest omission
+or single headline grade may hide a degraded run. For each rung above each run's grade, the checker
+prints the dimension that capped it and whether it was FAIL or UV. Machine-readable output is
+`{"runs":[...]}`, with one result object per run.
