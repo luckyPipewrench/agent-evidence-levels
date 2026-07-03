@@ -188,6 +188,15 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 func loadKeys(keysDir string) (map[string]ed25519.PublicKey, error) {
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {
+		// A missing keys directory means no keys were published out of band,
+		// which is the same posture as an empty directory: nothing to verify
+		// against, so dependent checks resolve to UNABLE-TO-VERIFY rather than
+		// crashing. (Git does not track empty directories, so a fixture with an
+		// intentionally-empty keys dir arrives here as "not found" on a fresh
+		// clone.)
+		if os.IsNotExist(err) {
+			return map[string]ed25519.PublicKey{}, nil
+		}
 		return nil, fmt.Errorf("read keys dir: %w", err)
 	}
 	keys := map[string]ed25519.PublicKey{}
