@@ -21,8 +21,9 @@ An **artifact** is a directory:
 **Published keys are provided out-of-band, not in the artifact.** The checker is invoked
 `aelcheck --keys <keysdir> <artifact>`; `<keysdir>/<fingerprint>.pub` holds a base64 (std, padded)
 Ed25519 public key (32 raw bytes). A record referencing a fingerprint absent from `<keysdir>` is
-**UNABLE-TO-VERIFY (UV)**, not FAIL. A `fingerprint` is the lowercase hex SHA-256 of the 32 raw
-public-key bytes.
+**UNABLE-TO-VERIFY (UV)**, not FAIL. A malformed key file is treated as unavailable for that
+fingerprint, so the dependent verification is UV rather than artifact FAIL. A `fingerprint` is the
+lowercase hex SHA-256 of the 32 raw public-key bytes.
 
 ## 2. Signed record line (exact-bytes discipline)
 
@@ -110,8 +111,10 @@ missing tail evident.
 
 The manifest is a table of contents. The checker trusts nothing in it that a signature does not
 corroborate. `claimed_rung` is compared against the checker's **independently computed** rung.
-`coverage`, `custody`, `retention` are operator **declarations** the checker echoes as annotations;
-the only custody fact the checker proves is that AEL-2 recorders sign under **different** keys.
+`coverage`, `custody`, `retention` are operator **declarations** the checker echoes as annotations.
+The custody facts the checker proves are limited to key separation: AEL-2 recorders sign under
+**different** keys, AEL-3 `anchor.log_key` differs from recorder keys, and AEL-4
+`counterparty.key` differs from recorder keys.
 
 ## 6. anchors.json (AEL-3, canonical JSON)
 
@@ -125,11 +128,12 @@ the only custody fact the checker proves is that AEL-2 recorders sign under **di
 
 Merkle tree is RFC 6962: `leaf_hash = SHA-256(0x00 || data)` where `data` = the anchored record's
 `payload_bytes`; `node = SHA-256(0x01 || left || right)`. The checker: verifies `tree_head.sig`
-under the provided `log_key` (absent → UV); for each entry recomputes the root from `leaf`,`index`,
-`proof`,`size` and requires it equals `tree_head.root`. The latest anchored `seq` per recorder is
-the **anchored head**; records with higher `seq` are **UNANCHORED-WINDOW** (graded at the recorder's
-unanchored rung). A re-signed alternative chain whose record at an anchored `seq` differs yields a
-`leaf` that does not match the anchored `leaf` → **anchor mismatch (FAIL)**.
+under the provided `log_key` (absent → UV); requires `log_key` to differ from recorder signing keys
+(same key → FAIL); for each entry recomputes the root from `leaf`,`index`, `proof`,`size` and
+requires it equals `tree_head.root`. The latest anchored `seq` per recorder is the **anchored
+head**; records with higher `seq` are **UNANCHORED-WINDOW** (graded at the recorder's unanchored
+rung). A re-signed alternative chain whose record at an anchored `seq` differs yields a `leaf` that
+does not match the anchored `leaf` → **anchor mismatch (FAIL)**.
 
 ## 7. counterparty.jsonl (AEL-4)
 
@@ -140,10 +144,12 @@ Same compact `b64url(payload).b64url(sig)` line form, signed by the counterparty
  "received":{"event_id":"<id>"} | {"none":true}}
 ```
 
-Checker: verify signature under `counterparty.key` (absent → UV); require `run` equals the
-artifact run AND `nonce` equals the run `open` record's `cp_nonce` (mismatch → **wrong-run,
-rejected**); two-way audit over declared `flows` matching `activity` events (`dir:"out"`, class in
-`flows`) to `received.event_id` — report `recorded-but-unconfirmed` and `confirmed-but-unrecorded`.
+Checker: verify signature under `counterparty.key` (absent key or absent `counterparty.jsonl` → UV);
+require `counterparty.key` to differ from recorder signing keys (same key → FAIL); require `run`
+equals the artifact run AND `nonce` equals the run `open` record's `cp_nonce` (mismatch →
+**wrong-run, rejected**); two-way audit over declared `flows` matching `activity` events
+(`dir:"out"`, class in `flows`) to `received.event_id` — report `recorded-but-unconfirmed` and
+`confirmed-but-unrecorded`.
 
 ## 8. policy docs & R (policy/<policy-hash>.json, canonical JSON)
 

@@ -112,22 +112,23 @@ type RecorderLog struct {
 }
 
 type Artifact struct {
-	Dir             string
-	KeysDir         string
-	ManifestRaw     []byte
-	Manifest        Manifest
-	ManifestErr     error
-	ManifestCanon   bool
-	Keys            map[string]ed25519.PublicKey
-	RecorderLogs    []*RecorderLog
-	Anchors         *Anchors
-	AnchorsRaw      []byte
-	AnchorsErr      error
-	Counterparty    []*CounterpartyStatement
-	CounterpartyErr error
-	Policies        map[string]*PolicyDoc
-	PolicyRaw       map[string][]byte
-	PolicyLoadErrs  map[string]error
+	Dir                 string
+	KeysDir             string
+	ManifestRaw         []byte
+	Manifest            Manifest
+	ManifestErr         error
+	ManifestCanon       bool
+	Keys                map[string]ed25519.PublicKey
+	RecorderLogs        []*RecorderLog
+	Anchors             *Anchors
+	AnchorsRaw          []byte
+	AnchorsErr          error
+	Counterparty        []*CounterpartyStatement
+	CounterpartyMissing bool
+	CounterpartyErr     error
+	Policies            map[string]*PolicyDoc
+	PolicyRaw           map[string][]byte
+	PolicyLoadErrs      map[string]error
 }
 
 func LoadArtifact(dir, keysDir string) (*Artifact, error) {
@@ -193,20 +194,20 @@ func loadKeys(keysDir string) (map[string]ed25519.PublicKey, error) {
 		}
 		raw, err := os.ReadFile(filepath.Join(keysDir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("read key %s: %w", entry.Name(), err)
+			continue
 		}
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
 		if err != nil {
-			return nil, fmt.Errorf("decode key %s: %w", entry.Name(), err)
+			continue
 		}
 		if len(decoded) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("key %s has %d bytes, want %d", entry.Name(), len(decoded), ed25519.PublicKeySize)
+			continue
 		}
 		sum := sha256.Sum256(decoded)
 		fp := hex.EncodeToString(sum[:])
 		nameFP := strings.TrimSuffix(entry.Name(), ".pub")
 		if strings.ToLower(nameFP) != fp {
-			return nil, fmt.Errorf("key %s fingerprint mismatch, computed %s", entry.Name(), fp)
+			continue
 		}
 		keys[fp] = ed25519.PublicKey(decoded)
 	}
@@ -285,6 +286,9 @@ func (a *Artifact) loadAnchors() {
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
 		a.AnchorsErr = err
 		return
 	}
@@ -317,6 +321,10 @@ func (a *Artifact) loadCounterparty() {
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			a.CounterpartyMissing = true
+			return
+		}
 		a.CounterpartyErr = err
 		return
 	}
@@ -350,12 +358,12 @@ func parseCounterpartyLine(line, file string, lineNo int) *CounterpartyStatement
 		return stmt
 	}
 	parts := strings.Split(line, ".")
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := decodeCompactBase64(parts[0])
 	if err != nil {
 		stmt.LineErr = fmt.Errorf("decode payload: %w", err)
 		return stmt
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, err := decodeCompactBase64(parts[1])
 	if err != nil {
 		stmt.LineErr = fmt.Errorf("decode signature: %w", err)
 		return stmt

@@ -1,12 +1,11 @@
 {
-  "grade": 4,
+  "grade": 3,
   "r": "+R",
   "must": {
-    "R": "PASS",
     "r": "PASS",
     "s": "PASS",
     "t": "PASS",
-    "v": "PASS"
+    "v": "FAIL"
   },
   "note": ""
 }

@@ -36,6 +36,8 @@ func Evaluate(art *Artifact) Result {
 	checks["r"] = checkCounterpartySignatures(art)
 	checks["s"] = checkCounterpartyBinding(art)
 	checks["t"] = checkCounterpartyAudit(art)
+	checks["u"] = checkLogKeyIndependent(art)
+	checks["v"] = checkCounterpartyKeyIndependent(art)
 	rSuffix, rOutcome := checkR(art)
 	checks["R"] = rOutcome
 
@@ -333,6 +335,9 @@ func checkInclusion(art *Artifact) Outcome {
 	if art.Anchors == nil {
 		return Outcome{Status: UV, Message: "anchors.json is absent"}
 	}
+	if len(art.Anchors.Entries) == 0 {
+		return Outcome{Status: Fail, Message: "anchors.json has no inclusion entries"}
+	}
 	root, err := decodeHex32(art.Anchors.TreeHead.Root)
 	if err != nil {
 		return Outcome{Status: Fail, Message: fmt.Sprintf("tree_head.root: %v", err)}
@@ -395,7 +400,7 @@ func checkUnanchoredWindow(art *Artifact) Outcome {
 	}
 	latest := map[string]int{}
 	for _, entry := range art.Anchors.Entries {
-		if entry.Seq > latest[entry.Recorder] || latest[entry.Recorder] == 0 {
+		if prev, ok := latest[entry.Recorder]; !ok || entry.Seq > prev {
 			latest[entry.Recorder] = entry.Seq
 		}
 	}
@@ -403,6 +408,7 @@ func checkUnanchoredWindow(art *Artifact) Outcome {
 	for _, log := range logsForArtifactRun(art) {
 		head, ok := latest[log.ID]
 		if !ok {
+			windows = append(windows, fmt.Sprintf("%s:all", log.ID))
 			continue
 		}
 		for _, rec := range log.Records {
@@ -412,14 +418,33 @@ func checkUnanchoredWindow(art *Artifact) Outcome {
 		}
 	}
 	if len(windows) > 0 {
-		return Outcome{Status: Pass, Message: "UNANCHORED-WINDOW " + strings.Join(windows, ",")}
+		return Outcome{Status: Fail, Message: "UNANCHORED-WINDOW " + strings.Join(windows, ",")}
 	}
 	return Outcome{Status: Pass, Message: "no records beyond latest anchored seq"}
+}
+
+func checkLogKeyIndependent(art *Artifact) Outcome {
+	if art.Manifest.Anchor == nil {
+		return Outcome{Status: UV, Message: "manifest anchor block is absent"}
+	}
+	logKey := strings.ToLower(art.Manifest.Anchor.LogKey)
+	if logKey == "" {
+		return Outcome{Status: UV, Message: "manifest anchor.log_key is absent"}
+	}
+	for _, log := range logsForArtifactRun(art) {
+		if strings.ToLower(log.Key) == logKey {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("anchor log key %s is also recorder %s key", logKey, log.ID)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "anchor log key differs from recorder keys"}
 }
 
 func checkCounterpartySignatures(art *Artifact) Outcome {
 	if art.Manifest.Counterparty == nil {
 		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	if art.CounterpartyMissing {
+		return Outcome{Status: UV, Message: "counterparty.jsonl is absent"}
 	}
 	if art.CounterpartyErr != nil {
 		return Outcome{Status: Fail, Message: art.CounterpartyErr.Error()}
@@ -448,6 +473,9 @@ func checkCounterpartyBinding(art *Artifact) Outcome {
 	if art.Manifest.Counterparty == nil {
 		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
 	}
+	if art.CounterpartyMissing {
+		return Outcome{Status: UV, Message: "counterparty.jsonl is absent"}
+	}
 	run := artifactRun(art)
 	nonce := runNonce(art, run)
 	if nonce == "" {
@@ -470,6 +498,9 @@ func checkCounterpartyBinding(art *Artifact) Outcome {
 func checkCounterpartyAudit(art *Artifact) Outcome {
 	if art.Manifest.Counterparty == nil {
 		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	if art.CounterpartyMissing {
+		return Outcome{Status: UV, Message: "counterparty.jsonl is absent"}
 	}
 	run := artifactRun(art)
 	nonce := runNonce(art, run)
@@ -509,6 +540,22 @@ func checkCounterpartyAudit(art *Artifact) Outcome {
 		}
 	}
 	return Outcome{Status: Pass, Message: "confirmed flows match recorded outbound events"}
+}
+
+func checkCounterpartyKeyIndependent(art *Artifact) Outcome {
+	if art.Manifest.Counterparty == nil {
+		return Outcome{Status: UV, Message: "manifest counterparty block is absent"}
+	}
+	counterpartyKey := strings.ToLower(art.Manifest.Counterparty.Key)
+	if counterpartyKey == "" {
+		return Outcome{Status: UV, Message: "manifest counterparty.key is absent"}
+	}
+	for _, log := range logsForArtifactRun(art) {
+		if strings.ToLower(log.Key) == counterpartyKey {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("counterparty key %s is also recorder %s key", counterpartyKey, log.ID)}
+		}
+	}
+	return Outcome{Status: Pass, Message: "counterparty key differs from recorder keys"}
 }
 
 func checkR(art *Artifact) (string, Outcome) {
@@ -574,17 +621,17 @@ func computeGrade(res *Result) {
 		return
 	}
 	res.Grade = 2
-	if !allPass(res.Checks, "n", "o") {
-		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "n", "o"))
+	if !allPass(res.Checks, "n", "o", "u") {
+		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "n", "o", "u"))
 		return
 	}
-	if res.Checks["p"].Status == Fail {
-		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "p"))
+	if !allPass(res.Checks, "p", "q") {
+		res.Notes = append(res.Notes, firstCap("AEL-3 capped", res.Checks, "p", "q"))
 		return
 	}
 	res.Grade = 3
-	if !allPass(res.Checks, "r", "s", "t") {
-		res.Notes = append(res.Notes, firstCap("AEL-4 capped", res.Checks, "r", "s", "t"))
+	if !allPass(res.Checks, "r", "s", "t", "v") {
+		res.Notes = append(res.Notes, firstCap("AEL-4 capped", res.Checks, "r", "s", "t", "v"))
 		return
 	}
 	res.Grade = 4

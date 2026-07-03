@@ -56,6 +56,7 @@ type caseDef struct {
 	expect          expected
 	publishKeys     bool
 	omitKeys        map[string]bool
+	badKeyFiles     map[string][]byte
 	keys            map[string]ed25519.PublicKey
 	manifestExtra   map[string]any
 	coverage        string
@@ -267,6 +268,14 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	if err != nil {
 		return nil, err
 	}
+	ael3RecorderKeyAnchor, err := buildAnchors("test-log", priv, map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2})
+	if err != nil {
+		return nil, err
+	}
+	ael3PrefixAnchor, err := buildAnchors("test-log", logPriv, map[string][]signedRecord{"r1": ael2R1[:3], "r2": ael2R2[:3]})
+	if err != nil {
+		return nil, err
+	}
 	badInclusion, err := corruptFirstProof(ael3Anchor)
 	if err != nil {
 		return nil, err
@@ -322,12 +331,20 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	if err != nil {
 		return nil, err
 	}
+	cpRecorderKey, err := buildCounterparty(priv, "run-ael4-valid", cpNonce, "net", "evt-1")
+	if err != nil {
+		return nil, err
+	}
 
 	ael2Extra := map[string]any{"correspondence": map[string]any{"classes": []any{"net"}, "match": "id"}}
 	ael3Extra := cloneAnyMap(ael2Extra)
 	ael3Extra["anchor"] = map[string]any{"log": "test-log", "log_key": logFP, "file": "anchors.json"}
+	ael3RecorderKeyExtra := cloneAnyMap(ael2Extra)
+	ael3RecorderKeyExtra["anchor"] = map[string]any{"log": "test-log", "log_key": fp, "file": "anchors.json"}
 	ael4Extra := cloneAnyMap(ael3Extra)
 	ael4Extra["counterparty"] = map[string]any{"file": "counterparty.jsonl", "flows": []any{"net"}, "key": cpFP}
+	ael4RecorderKeyExtra := cloneAnyMap(ael3Extra)
+	ael4RecorderKeyExtra["counterparty"] = map[string]any{"file": "counterparty.jsonl", "flows": []any{"net"}, "key": fp}
 	multiKeys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub}
 	anchoredKeys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub}
 	ael4Keys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub, cpFP: cpPub}
@@ -340,6 +357,8 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		{name: "ael0/noncanonical", records: noncanonical, expect: expect("ungraded", "pending", map[string]string{"b": "FAIL"})},
 		{name: "ael0/dupkey", records: dupKey, expect: expect("ungraded", "pending", map[string]string{"b": "FAIL"})},
 		{name: "ael0/unpublished_key", records: ael0Valid, publishKeys: false, expect: expect("ungraded", "pending", map[string]string{"a": "UV"})},
+		{name: "ael0/bad_key_length", records: ael0Valid, badKeyFiles: map[string][]byte{fp: []byte(base64.StdEncoding.EncodeToString([]byte("short")) + "\n")}, expect: expect("ungraded", "pending", map[string]string{"a": "UV"})},
+		{name: "ael0/tail_truncated_silent", records: ael0Valid[:2], expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael1/valid", records: ael1Valid, expect: expect(1, "pending", map[string]string{"f": "PASS", "g": "PASS", "h": "PASS", "i": "PASS"})},
 		{name: "ael1/seq_gap", records: seqGap, expect: expect(0, "pending", map[string]string{"g": "FAIL"})},
 		{name: "ael1/heartbeat_gap", records: heartbeatGap, expect: expect(0, "pending", map[string]string{"h": "FAIL"})},
@@ -350,13 +369,18 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		{name: "ael2/valid", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"})},
 		{name: "ael2/one_side_deleted", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": oneSideR2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(1, "pending", map[string]string{"m": "FAIL"})},
 		{name: "ael2/same_key", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": sameKeyR2}, recorderKeys: map[string]string{"r1": fp, "r2": fp}, keys: map[string]ed25519.PublicKey{fp: pub}, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(1, "pending", map[string]string{"l": "FAIL"})},
-		{name: "ael3/valid", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(3, "pending", map[string]string{"n": "PASS", "o": "PASS", "p": "PASS"})},
+		{name: "ael3/valid", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(3, "pending", map[string]string{"n": "PASS", "o": "PASS", "p": "PASS", "q": "PASS", "u": "PASS"})},
 		{name: "ael3/bad_inclusion", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: badInclusion, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"o": "FAIL"})},
 		{name: "ael3/alt_history", recorderRecords: map[string][]signedRecord{"r1": altHistoryR1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"p": "FAIL"})},
 		{name: "ael3/no_logkey", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, omitKeys: map[string]bool{logFP: true}, anchors: ael3Anchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"n": "UV"})},
-		{name: "ael4/valid", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpValid, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(4, "+R", map[string]string{"r": "PASS", "s": "PASS", "t": "PASS", "R": "PASS"})},
+		{name: "ael3/no_anchors_file", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"n": "UV", "o": "UV", "p": "UV", "q": "UV"})},
+		{name: "ael3/logkey_not_independent", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, anchors: ael3RecorderKeyAnchor, manifestExtra: ael3RecorderKeyExtra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"n": "PASS", "o": "PASS", "p": "PASS", "u": "FAIL"})},
+		{name: "ael3/unanchored_tail", recorderRecords: map[string][]signedRecord{"r1": ael2R1, "r2": ael2R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael3PrefixAnchor, manifestExtra: ael3Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"n": "PASS", "o": "PASS", "p": "PASS", "q": "FAIL", "u": "PASS"})},
+		{name: "ael4/valid", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpValid, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(4, "+R", map[string]string{"r": "PASS", "s": "PASS", "t": "PASS", "v": "PASS", "R": "PASS"})},
 		{name: "ael4/wrong_run_confirmation", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpWrongRun, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"s": "FAIL"})},
+		{name: "ael4/no_counterparty_file", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"r": "UV", "s": "UV", "t": "UV"})},
 		{name: "ael4/unrecorded_delivery", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: ael4Keys, anchors: ael4Anchor, counterparty: cpUnrecorded, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4Extra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"t": "FAIL"})},
+		{name: "ael4/cp_key_not_independent", recorderRecords: map[string][]signedRecord{"r1": ael4R1, "r2": ael4R2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: anchoredKeys, anchors: ael4Anchor, counterparty: cpRecorderKey, policies: map[string][]byte{policyHash: policyRaw}, manifestExtra: ael4RecorderKeyExtra, coverage: "enforced-total", custody: "independent", expect: expect(3, "+R", map[string]string{"r": "PASS", "s": "PASS", "t": "PASS", "v": "FAIL"})},
 	}, nil
 }
 
@@ -412,7 +436,11 @@ func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
 			if c.omitKeys[keyFP] {
 				continue
 			}
-			if err := os.WriteFile(filepath.Join(caseDir, "keys", keyFP+".pub"), []byte(base64.StdEncoding.EncodeToString(keys[keyFP])+"\n"), 0o644); err != nil {
+			raw := []byte(base64.StdEncoding.EncodeToString(keys[keyFP]) + "\n")
+			if override, ok := c.badKeyFiles[keyFP]; ok {
+				raw = override
+			}
+			if err := os.WriteFile(filepath.Join(caseDir, "keys", keyFP+".pub"), raw, 0o644); err != nil {
 				return err
 			}
 		}
@@ -846,7 +874,7 @@ func compareExpected(res ael.Result, exp expected) bool {
 
 func reportChecks(res ael.Result) string {
 	var parts []string
-	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "R"} {
+	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "u", "r", "s", "t", "v", "R"} {
 		if out, ok := res.Checks[id]; ok {
 			parts = append(parts, fmt.Sprintf("%s=%s", id, out.Status))
 		}

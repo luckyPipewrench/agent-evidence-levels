@@ -73,12 +73,12 @@ func ParseRecordLine(line, file string, lineNo int) (*Record, error) {
 		return rec, nil
 	}
 	parts := strings.Split(line, ".")
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := decodeCompactBase64(parts[0])
 	if err != nil {
 		rec.LineErr = fmt.Errorf("decode payload: %w", err)
 		return rec, nil
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, err := decodeCompactBase64(parts[1])
 	if err != nil {
 		rec.LineErr = fmt.Errorf("decode signature: %w", err)
 		return rec, nil
@@ -125,6 +125,17 @@ func (r *Record) Verify(keys map[string]ed25519.PublicKey) {
 		return
 	}
 	r.CanonicalOK = true
+}
+
+func decodeCompactBase64(s string) ([]byte, error) {
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	if base64.RawURLEncoding.EncodeToString(raw) != s {
+		return nil, fmt.Errorf("non-canonical base64url segment")
+	}
+	return raw, nil
 }
 
 func firstErr(errs ...error) error {

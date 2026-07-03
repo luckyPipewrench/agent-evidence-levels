@@ -66,7 +66,7 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **Artifact MUST add:** (a) chain heads and run-close commitments registered, at a declared cadence, in an append-only log operated by a party independent of both operator and vendor, where the log supports inclusion proofs and consistency proofs; (b) the inclusion proofs; (c) the log's identity and verification key, published.
 
-**Checker MUST demonstrate:** AEL-2 demonstrations; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
+**Checker MUST demonstrate:** AEL-2 demonstrations; that the log verification key differs from the recorder signing keys; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
 
 **MAY assert:** "History up to each anchored head cannot be rewritten, retroactively edited, or presented in two conflicting versions without detection by any holder of the anchor references."
 
@@ -76,7 +76,7 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **Artifact MUST add:** (a) for a declared set of confirmed flows, signed statements from the destination party, or from an observer at the destination boundary, stating what it received, including "nothing," under keys independent of operator and vendor; (b) run binding: each statement carries the run identifier or nonce it answers, so an all-clear cannot be replayed across runs; (c) a correspondence rule mapping recorded outbound decisions to confirmations.
 
-**Checker MUST demonstrate:** AEL-3 demonstrations; verification of counterparty statements under counterparty keys; rejection of a statement bound to a different run (fixture: substitute another run's confirmation); a two-way cross-audit flagging recorded-but-unconfirmed and confirmed-but-unrecorded deliveries.
+**Checker MUST demonstrate:** AEL-3 demonstrations; that counterparty keys differ from the recorder signing keys; verification of counterparty statements under counterparty keys; rejection of a statement bound to a different run (fixture: substitute another run's confirmation); a two-way cross-audit flagging recorded-but-unconfirmed and confirmed-but-unrecorded deliveries.
 
 **MAY assert:** "For the confirmed flows, what the destination received is attested by a party outside the operator's trust domain. Fabricating a clean history for those flows requires the counterparty's cooperation."
 
