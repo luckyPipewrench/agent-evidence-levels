@@ -68,6 +68,12 @@ chain-continuity gates 0/1; recorder-custody (l) gates 2; external-anchoring (n,
 counterparty-independence (r,s,t,v) gates 4; mediation-coverage, retention = annotations (bound
 claims, do not lower the number); decision-reproducibility = the R suffix.
 
+Retention is annotation-only (SPEC §3.7): the checker echoes `manifest.retention` on every per-run
+grade and never uses it in the grade computation, never lets it excuse an in-artifact failure, and
+never treats a declared period as proof of durability. `TestRetentionNeverAffectsGrade` locks this in
+by re-grading valid artifacts under varied and empty retention values and asserting the grade never
+moves.
+
 Grade line: `run <id>: AEL-n [+R|R-pending] (coverage: <c>; custody: <c>; anchor: <a>; retention: <r>)`.
 
 ## 3. Fixture matrix

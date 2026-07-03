@@ -90,6 +90,22 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **With R, MAY assert:** "The recorded verdict is the deterministic output of the recorded inputs under the recorded policy; the decision itself is auditable from the record." **Without R, MUST NOT assert** that a verdict can be independently re-derived, or that the decision, as opposed to its occurrence, is auditable.
 
+### 3.7 Retention: a mandatory annotation, never a grade
+
+Retention is the operator's policy for how long records are intended to remain available for verification, and under whose storage custody. It is a mandatory annotation on every published grade. It is **not** a rung and **not** scored as proof, because it is a promise about the future and about storage that no checker can verify from an artifact presented today.
+
+**Artifact MAY declare** `manifest.retention` (a period and a storage custody). The declaration is the operator's stated policy. It is not signed evidence of actual past retention, future availability, storage durability, or legal compliance.
+
+**Checker MUST** report the declared retention value with every per-run grade, and MUST label it as an operator declaration. The v0.1 artifact format defines no stronger, verifiable retention proof.
+
+**Checker MUST NOT** raise, lower, or otherwise award a rung based on the declared retention period or storage custody. It MUST NOT treat a declared period as proof that records were retained, will remain available, were stored on durable media, or were held by the declared custodian.
+
+**Retention MUST NOT excuse in-artifact nonconformance.** Within a presented artifact, a sequence gap, heartbeat gap, missing close, anchor mismatch, cross-recorder discrepancy, or counterparty discrepancy stays PASS / FAIL / UV per its own check. A declared retention period never converts an in-artifact failure into an "aged-out absence."
+
+**Absence is not cleanliness.** When a verifier asks about a run or interval for which no artifact exists and, by an externally supplied evaluation time, the material falls outside the declared retention period, the honest result is `OUTSIDE-DECLARED-RETENTION / UV` — "not available for verification under the declared policy." It MUST NOT be reported as evidence that the run was clean, complete, or properly disposed of. (v0.1's checker grades presented artifacts and does not consume an external evaluation time, so this outcome is a defined reporting principle, not yet a checker behavior.)
+
+**Timestamps are not trusted time.** Recorder-signed `ts` values are evidence only of the recorder's signed timeline, not trusted wall-clock time. In v0.1 they support monotonicity and declared heartbeat-spacing checks; they do not prove a record's real-world age. Binding to real time would require an independent time proof (for example an RFC 3161 timestamp token or a time-bearing external log proof), which v0.1 does not define.
+
 ## 4. Sub-dimensions
 
 A single flat grade decomposes into these dimensions. Each rung sets required minimums; the grade is the minimum across them; the remainder annotate every published grade and bound what it may claim.
@@ -101,7 +117,7 @@ A single flat grade decomposes into these dimensions. Each rung sets required mi
 | Chain continuity | Are omission, silence, and truncation visible? | none / linked / contiguous + heartbeat + close | Gates AEL-0 and AEL-1. |
 | External anchoring | Can history be rewritten or forked? | none / operator-run log / independent append-only log | Gates AEL-3. |
 | Counterparty independence | Does the far end attest what arrived? | none / partial flows / declared confirmed set | Gates AEL-4. |
-| Retention / durability | For how long do records stay verifiable? | declared period and storage custody | Mandatory annotation. Records outside the period are UV, not absent. |
+| Retention / durability | How long does the operator intend records to stay available? | declared period and storage custody | Mandatory annotation only (§3.7). Never gates a rung, never excuses an in-artifact failure. Absent-and-past-retention is `OUTSIDE-DECLARED-RETENTION / UV`, never proof of cleanliness. |
 | Verifier portability | Can a stranger check this offline? | vendor-only / published key and format / independent implementations exist | Required at every rung. Vendor-only means Ungraded. |
 | Decision-reproducibility | Can the verdict be re-derived from the record? | R-pending / +R | Suffix at every rung. |
 
@@ -143,6 +159,8 @@ Concrete deployments, including the editor's own, are graded in `GRADES.md` unde
 **Name and collision check.** "Agent Evidence Level," abbreviated AEL, always expanded on first use. The acronym is established in unrelated fields (accessible emission limits in laser safety; exposure limits in industrial hygiene); no standard named "Agent Evidence Level" exists as of July 2026, and the nearest adjacent work grades evidence-process maturity rather than checker-verified artifacts. Graded levels are written AEL-0 through AEL-4; the search handle is the full phrase.
 
 **One-sentence definition, for a procurement document:** "The Agent Evidence Level grades a vendor's records of AI-agent activity, from AEL-0 to AEL-4, by what an independent party can verify, and what omission they can detect, without trusting the vendor or the operator."
+
+**Relationship to prior art.** AEL is not an audit-control framework and not a records-retention regime; it is a cryptographic evidence-grade lens for the artifacts that audit and logging mechanisms produce. It borrows established vocabulary rather than coining its own and consumes existing transparency logs at AEL-3 rather than competing with them. See `docs/PRIOR-ART.md` for the mapping (RFC 5848 signed syslog, RFC 6962/9162 and SCITT transparency, RFC 3161 trusted time, NIST SP 800-92 and SP 800-53 AU-11 for the retention neighborhood).
 
 **The two questions every buyer should ask:**
 

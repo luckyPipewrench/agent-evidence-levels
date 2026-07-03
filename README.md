@@ -12,6 +12,7 @@ trusting the vendor or the operator.
   artifacts the checker must reject or flag (Apache-2.0).
 - **`GRADES.md`** — the self-grading registry; the editor's row is first and held to the same rule.
 - **`docs/VERSIONING.md`** — draft stability, compatibility, and donation posture.
+- **`docs/PRIOR-ART.md`** — how AEL relates to existing standards (transparency logs, audit-log and retention standards, evidence-handling), and what it deliberately does not restate.
 - **`CONTRIBUTING.md`** — contribution rules and required validation.
 
 ## Why a checker ships with the spec
