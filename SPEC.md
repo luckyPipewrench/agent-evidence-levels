@@ -147,7 +147,7 @@ Mechanisms, never vendors. Grades assume the mechanism as commonly shipped; a sp
 | Plain logs (files, JSON lines, syslog, SIEM forwarding) | Ungraded | Mutable in place; no signature, no order commitment. Forwarding to a SIEM moves a copy; the record arrives pre-trusted and stays unverifiable. |
 | Local self-attested records (vendor-verifiable signatures or hash chains; no published key, format, or checker) | Ungraded (UV) | Fails verifier portability. A signature only its producer can check is attestation wearing math. |
 | Operator-published signed chains (signed, hash-chained, offline-verifiable against a published key) | AEL-0 | The strongest mechanism in common circulation today. Authentic and ordered; interior deletion detectable. Tail truncation, deleted runs, and fabricated histories remain silent, because one keyholder produced everything. |
-| Externally-anchored chains (heads in a transparency log; single recorder; no heartbeats or signed close) | AEL-0 (anchor: independent) | Anchoring freezes what was recorded and says nothing about what was not. Marketing rounds this up to "immutable audit trail"; the minimum rule does not. Rungs 1 and 2 are missing, so rung 3 is not earned. |
+| Externally-anchored chains (heads in a transparency log; single recorder; no heartbeats or signed close) | AEL-0 (anchor: independent) | Anchoring freezes what was recorded and says nothing about what was not, so it earns the anchoring sub-dimension but not completeness. Rungs 1 and 2 are missing, so rung 3 is not earned. |
 | Independently-confirmed delivery (counterparty receipts, with no graded record behind them) | Ungraded to AEL-0 overall; rung-4 property on confirmed flows only | Confirms that specific deliveries happened. With no graded record to reconcile against, it cannot support run-level claims. |
 
 ### 7.1 Self-grading registry
@@ -162,17 +162,10 @@ Concrete deployments, including the editor's own, are graded in `GRADES.md` unde
 
 **Relationship to prior art.** AEL is not an audit-control framework and not a records-retention regime; it is a cryptographic evidence-grade lens for the artifacts that audit and logging mechanisms produce. It borrows established vocabulary rather than coining its own and consumes existing transparency logs at AEL-3 rather than competing with them. See `docs/PRIOR-ART.md` for the mapping (RFC 5848 signed syslog, RFC 6962/9162 and SCITT transparency, RFC 3161 trusted time, NIST SP 800-92 and SP 800-53 AU-11 for the retention neighborhood).
 
-**The two questions every buyer should ask:**
-
-1. "What AEL does your evidence earn when the reference checker runs on an artifact you hand me, and which sub-dimension caps it?"
-2. "If a record were silently dropped, or an action bypassed the boundary, who outside your trust domain would detect it, and how?"
-
-**The tell.** "We produce tamper-proof logs" is a tell: the phrase claims the strongest property that still requires trusting the keyholder, and a vendor who stops there has announced their grade.
-
 **Home.** The specification lives in a standalone, vendor-neutral repository: spec under CC BY 4.0, reference checker and fixtures under Apache-2.0, no product marks in the specification. Product sites point at the repository; the repository points at no product.
 
 **GRADES.md.** The repository carries a self-grading registry. Any mechanism owner may open a pull request adding a row; a row must link an artifact and a checker transcript; rows without runnable evidence carry the label "asserted." The editor's row is held to the same rule as everyone else's.
 
-**Adoption posture.** Cite, do not pitch. Use the vocabulary where evidence is discussed: standards threads, RFP language, benchmark scoring ("that mechanism is AEL-0"; "this requirement should read: AEL-1 or higher, R required"). The vocabulary spreads by being useful in a sentence, with the specification one link behind it.
+**Endgame.** Once the vocabulary has usage independent of its editor, editorship is donated to a neutral foundation of the OpenSSF or OWASP class, with the reference checker maintained through the transition.
 
-**Endgame.** Once the vocabulary has usage independent of its editor, editorship is donated to a neutral foundation of the OpenSSF or OWASP class, with the reference checker maintained through the transition. Owning a standard is a brochure; editing a donated one is a category.
+**Non-normative material.** Positioning and adoption guidance (including the questions a buyer should ask and how to read common marketing claims) live in `docs/RATIONALE.md`, outside the normative specification.

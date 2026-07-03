@@ -34,7 +34,6 @@ bytes are canonical. Signature first, canonicality second: it never re-serialize
 ## 3. Grade it
 
 ```
-export TMPDIR=$HOME/.cache/pipelock-tmp GOTMPDIR=$HOME/.cache/pipelock-tmp GOCACHE=$HOME/.cache/go-build
 cd <repo>
 go build -o bin/aelcheck ./checker/cmd/aelcheck
 ./bin/aelcheck --keys fixtures/ael1/valid/keys fixtures/ael1/valid
