@@ -46,8 +46,65 @@
     "ext": { "type": "object", "description": "reserved opaque forward-compat namespace; never read or graded by the checker" }
   },
   "allOf": [
-    { "if": { "properties": { "type": { "const": "open" } } }, "then": { "required": ["hmax", "htol"] } },
-    { "if": { "properties": { "type": { "const": "activity" } } }, "then": { "required": ["event"] } },
-    { "if": { "properties": { "type": { "const": "close" } } }, "then": { "required": ["count", "head"] } }
+    {
+      "if": { "properties": { "type": { "const": "open" } }, "required": ["type"] },
+      "then": {
+        "required": ["hmax", "htol"],
+        "not": {
+          "anyOf": [
+            { "required": ["event"] },
+            { "required": ["decision"] },
+            { "required": ["count"] },
+            { "required": ["head"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "activity" } }, "required": ["type"] },
+      "then": {
+        "required": ["event"],
+        "not": {
+          "anyOf": [
+            { "required": ["hmax"] },
+            { "required": ["htol"] },
+            { "required": ["cp_nonce"] },
+            { "required": ["count"] },
+            { "required": ["head"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "heartbeat" } }, "required": ["type"] },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["hmax"] },
+            { "required": ["htol"] },
+            { "required": ["cp_nonce"] },
+            { "required": ["event"] },
+            { "required": ["decision"] },
+            { "required": ["count"] },
+            { "required": ["head"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "close" } }, "required": ["type"] },
+      "then": {
+        "required": ["count", "head"],
+        "not": {
+          "anyOf": [
+            { "required": ["hmax"] },
+            { "required": ["htol"] },
+            { "required": ["cp_nonce"] },
+            { "required": ["event"] },
+            { "required": ["decision"] }
+          ]
+        }
+      }
+    }
   ]
 }

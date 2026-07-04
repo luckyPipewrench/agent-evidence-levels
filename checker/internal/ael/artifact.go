@@ -161,9 +161,15 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 		art.ManifestErr = err
 	} else {
 		art.ManifestCanon = string(canon) == string(raw)
+		if !art.ManifestCanon {
+			art.ManifestErr = fmt.Errorf("manifest.json is not canonical")
+		}
 	}
 	if err := json.Unmarshal(raw, &art.Manifest); err != nil {
 		art.ManifestErr = err
+	}
+	if art.ManifestErr != nil {
+		return nil, fmt.Errorf("manifest: %w", art.ManifestErr)
 	}
 
 	for _, rec := range art.Manifest.Recorders {
