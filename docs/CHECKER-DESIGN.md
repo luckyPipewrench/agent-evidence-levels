@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # AEL reference checker: check matrix, rung computation, fixture matrix
 
 Maps every falsifiable duty in `SPEC.md` to a concrete check and a fixture that breaks it. The

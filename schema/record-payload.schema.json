@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
   "$id": "https://agent-evidence-levels.example/schema/record-payload.schema.json",
   "title": "AEL record payload (v0.1)",
   "description": "The canonical JSON payload carried in each base64url(payload).base64url(sig) record line. Signed over its exact canonical bytes. Closed schema: no unknown top-level keys except a reserved opaque 'ext' object (see SPEC.md check w).",

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Vendor the exact, canonical full license texts into LICENSE (Apache-2.0) and
 # LICENSE-SPEC (CC BY 4.0). Run once before a public release so the repository
 # ships the verbatim upstream legal text rather than a hand-copied approximation.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # AEL reference checker + fixture corpus.
 # Stdlib-only Go. Cache dirs kept under $HOME (some hosts have a quota-full /tmp).
 

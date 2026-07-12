@@ -52,8 +52,7 @@ The specification (`SPEC.md`) is CC BY 4.0. The checker and fixtures are Apache-
 ## Status
 
 v0.1 draft. This repository is vendor-neutral by construction: `SPEC.md` carries no product marks;
-concrete deployments (including the editor's) are graded in `GRADES.md`. On publication the module
-path and repository owner move to a neutral home; the intended endgame is donation of editorship to
-a neutral foundation once the vocabulary has independent usage.
+concrete deployments (including the editor's) are graded in `GRADES.md`. The intended governance
+end state is donation to a neutral body after the draft has real independent use and critique.
 
-See `docs/VERSIONING.md` for the draft stability and compatibility policy.
+See `docs/VERSIONING.md` for the draft stability, compatibility, and donation policy.

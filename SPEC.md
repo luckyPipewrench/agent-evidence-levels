@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # Agent Evidence Level (AEL)
 
 **A measurement standard for AI-agent audit evidence.**

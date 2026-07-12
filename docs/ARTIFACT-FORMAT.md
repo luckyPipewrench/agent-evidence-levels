@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # AEL artifact format v0.1
 
 The format the reference checker consumes and the fixtures use. JSON-based, small on purpose: it

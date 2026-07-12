@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # Versioning and Stability
 
 AEL v0.1 is a draft for publication. It is suitable for review, experiments,
@@ -31,4 +33,5 @@ and self-grading, but it is not yet a stable foundation-governed standard.
 
 The current editor may publish v0.x under this repository. The intended
 governance end state is donation of editorship to a neutral foundation once the
-vocabulary has independent use and the reference checker has external users.
+vocabulary has independent use and critique, and the reference checker has
+external users.

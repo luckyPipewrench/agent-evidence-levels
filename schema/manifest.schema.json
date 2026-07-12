@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
   "$id": "https://agent-evidence-levels.example/schema/manifest.schema.json",
   "title": "AEL manifest (v0.1)",
   "description": "The artifact table of contents. Untrusted: the checker trusts nothing here that a signature does not corroborate. Recorder identity is verified from record signatures, not from the declared key; coverage, custody, and retention are operator declarations.",

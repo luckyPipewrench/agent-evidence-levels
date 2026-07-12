@@ -37,5 +37,6 @@ If this scale graded its own editor at the top, you should distrust the scale.
 | Editor's own deployment | run asserted-current: AEL-0 R-pending | asserted | See editor's row above. |
 
 To add a row: open a pull request appending to the table with a link to your artifact bundle and
-the checker transcript (`aelcheck <artifact> > transcript.txt`). Rows without both links keep the
-**asserted** label.
+the checker transcript. For example, from the repo root after `make build`:
+`./bin/aelcheck --keys fixtures/ael1/valid/keys fixtures/ael1/valid > transcript.txt`.
+Use the same `--keys` form for your artifact. Rows without both links keep the **asserted** label.

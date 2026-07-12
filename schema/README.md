@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # JSON Schemas (v0.1)
 
 Machine-readable schemas for the AEL artifact objects, for independent reimplementers and for

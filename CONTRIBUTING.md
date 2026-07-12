@@ -32,9 +32,20 @@ make check
 `make check` regenerates the fixture corpus, grades every fixture, and verifies
 that each result matches `expect.json`.
 
+## DCO and inbound licensing
+
+By contributing, you certify the Developer Certificate of Origin 1.1 and include
+`Signed-off-by: Name <email>` on commits or in the pull request. PRs must include
+that sign-off before outside wording can merge.
+
+Inbound licensing follows `LICENSING.md`: normative specification text is under
+CC BY 4.0, and checker code, fixtures, and other code/data are under
+Apache-2.0. Contributions may also be re-contributed or donated to a neutral
+standards body under compatible permissive terms, consistent with
+`docs/VERSIONING.md`.
+
 ## Licensing
 
 Contributions to normative specification text are accepted under CC BY 4.0.
 Contributions to checker code, fixtures, and other code/data are accepted under
 Apache-2.0.
-
