@@ -1,0 +1,16 @@
+{
+  "events": {
+    "evt-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    },
+    "evt-2": {
+      "status": "DECLARED",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "GAP",
+  "gaps": [
+    "evt-2"
+  ]
+}

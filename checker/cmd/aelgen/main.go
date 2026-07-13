@@ -71,6 +71,20 @@ type caseDef struct {
 	manifestExtra   map[string]any
 	coverage        string
 	custody         string
+	govExpect       *govExpectation
+}
+
+// govExpectation is the expected governability output for a fixture, written to
+// expect_gov.json and asserted by the governability conformance test.
+type govExpectation struct {
+	Events   map[string]govEventExpect `json:"events"`
+	Coverage string                    `json:"coverage,omitempty"`
+	Gaps     []string                  `json:"gaps,omitempty"`
+}
+
+type govEventExpect struct {
+	Status string `json:"status"`
+	Class  string `json:"class"`
 }
 
 func main() {
@@ -499,6 +513,64 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	anchoredKeys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub}
 	ael4Keys := map[string]ed25519.PublicKey{fp: pub, rec2FP: rec2Pub, logFP: logPub, cpFP: cpPub}
 
+	// governability extension fixtures
+	govPolicyHash, govPolicyRaw, err := govPolicyFixture()
+	if err != nil {
+		return nil, err
+	}
+	govDecision := map[string]any{"policy": govPolicyHash, "request_fp": "fp-gov", "inputs": map[string]any{}, "verdict": "allow"}
+	govPolicyBound, err := buildRecords(priv, "run-gov-policy-bound", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "pay", "evt-1", "out", govDecision, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govDeclared, err := buildRecords(priv, "run-gov-declared", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		govActivity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, "reversible"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govUnclassified, err := buildRecords(priv, "run-gov-unclassified", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govDowngrade, err := buildRecords(priv, "run-gov-downgrade", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		govActivity("2026-01-01T00:00:10Z", "pay", "evt-1", "out", govDecision, "reversible"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govScopedPlan := []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		govActivity("2026-01-01T00:00:20Z", "pay", "evt-2", "out", nil, "irreversible"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:50Z", nil, ""),
+	}
+	govScopedR1, err := buildRecords(priv, "run-gov-scoped-out", "r1", fp, govScopedPlan)
+	if err != nil {
+		return nil, err
+	}
+	govScopedR2, err := buildRecords(rec2Priv, "run-gov-scoped-out", "r2", rec2FP, govScopedPlan)
+	if err != nil {
+		return nil, err
+	}
+
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
@@ -553,6 +625,11 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 			{ID: "run-mixed-a", Grade: 2, R: "pending", Must: map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}},
 			{ID: "run-mixed-b", Grade: 0, R: "pending", Must: map[string]string{"j": "FAIL"}},
 		})},
+		{name: "gov/policy_bound", records: govPolicyBound, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},
+		{name: "gov/declared", records: govDeclared, expect: expect(1, "pending", map[string]string{"f": "PASS", "w": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "DECLARED", Class: "reversible"}}, Coverage: "N/A"}},
+		{name: "gov/unclassified", records: govUnclassified, expect: expect(1, "pending", map[string]string{"f": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}}, Coverage: "N/A"}},
+		{name: "gov/downgrade", records: govDowngrade, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},
+		{name: "gov/irreversible_scoped_out", recorderRecords: map[string][]signedRecord{"r1": govScopedR1, "r2": govScopedR2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}, "evt-2": {Status: "DECLARED", Class: "irreversible"}}, Coverage: "GAP", Gaps: []string{"evt-2"}}},
 	}, nil
 }
 
@@ -716,7 +793,19 @@ func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(caseDir, "expect.json"), append(expectRaw, '\n'), 0o644)
+	if err := os.WriteFile(filepath.Join(caseDir, "expect.json"), append(expectRaw, '\n'), 0o644); err != nil {
+		return err
+	}
+	if c.govExpect != nil {
+		govRaw, err := json.MarshalIndent(c.govExpect, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(caseDir, "expect_gov.json"), append(govRaw, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildRecords(priv ed25519.PrivateKey, run, recorder, fp string, plans []recordPlan) ([]signedRecord, error) {
@@ -810,6 +899,34 @@ func policyFixture() (string, []byte, error) {
 		return "", nil, err
 	}
 	return shaHex(raw), raw, nil
+}
+
+// govPolicyFixture is a policy that also carries a reversibility map keyed by
+// event class. The base checker ignores the extra field (R still re-derives from
+// rules/default); the governability duty reads the map and reports POLICY-BOUND,
+// because the map is part of the signed, hash-referenced policy bytes.
+func govPolicyFixture() (string, []byte, error) {
+	raw, err := canonicalValue(map[string]any{
+		"v":       1,
+		"rules":   []any{},
+		"default": "allow",
+		"reversibility": map[string]any{
+			"pay": "irreversible",
+			"net": "reversible",
+		},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return shaHex(raw), raw, nil
+}
+
+// govActivity is an activity plan that also carries an agent-declared
+// reversibility class under the reserved, signed ext.gov namespace.
+func govActivity(ts, class, id, dir string, decision map[string]any, declared string) recordPlan {
+	extra := eventExtra(class, id, dir, decision)
+	extra["ext"] = map[string]any{"gov": map[string]any{"declared_reversibility": declared}}
+	return recordPlan{typ: "activity", ts: ts, extra: extra}
 }
 
 func buildAnchors(logID string, logPriv ed25519.PrivateKey, logs map[string][]signedRecord) ([]byte, error) {
