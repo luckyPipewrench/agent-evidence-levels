@@ -48,13 +48,20 @@ For each activity event the governability duty reports one status. None of them 
   not prove the policy itself is correct.
 - **DECLARED.** The class comes from `ext.gov.declared_reversibility` and is not
   bound to a policy. It is a signed claim with author provenance only.
-- **UNCLASSIFIED.** No class is present. The event is treated as `irreversible`
-  for coverage (Section 5), so an unlabeled action cannot dodge the coverage rule.
+- **UNCLASSIFIED.** No class is present, or a referenced enforcement policy cannot
+  be hash-verified. The event is treated as `irreversible` for coverage (Section 5),
+  so an unlabeled or unverifiable-policy action cannot dodge the coverage rule.
 
 When both a policy-bound class and an agent-declared class are present, the
 policy-bound class wins and the softer agent-declared value is reported as ignored.
 A securing runtime MUST NOT let an agent assert a class over the one the policy
 assigned.
+
+A record that references an enforcement policy whose bytes are missing, malformed,
+or do not hash to the decision's committed policy hash fails closed to UNCLASSIFIED
+irreversible. The base R check rejects exactly this input, so the governability duty
+must not fall back to the agent-declared class: falling open there would be the
+self-assertion the ladder already refuses.
 
 ## 4. Policy binding (strong form)
 
@@ -85,6 +92,13 @@ governability duty closes that with a fail-closed rule:
 
 With no correspondence declared the result is `N/A`, not a false `OK`.
 
+When more than one recorder reports the same event id, the duty reconciles them by
+keeping the worst case: the most severe reversibility class first, then the
+strongest provenance. Ranking provenance above class severity would let a
+POLICY-BOUND `reversible` record from one recorder mask an UNCLASSIFIED
+`irreversible` record for the same event, laundering the riskier action out of
+coverage. Severity wins so the coverage rule always sees the least-reversible view.
+
 ## 6. Conformance
 
 An implementation conforms if, over the signed artifact:
@@ -106,6 +120,14 @@ The reference corpus ships these fixtures under `fixtures/gov/`, asserted by
   is ignored (the self-assertion this extension forbids).
 - `irreversible_scoped_out` — an irreversible action whose class is left out of
   `correspondence.classes` is caught as a coverage GAP.
+- `hash_mismatch` — a record referencing a policy whose bytes do not hash to the
+  decision's committed hash fails closed to UNCLASSIFIED irreversible, never
+  trusting the tampered policy's class.
+- `missing_policy` — a record referencing a policy whose bytes are absent fails
+  closed to UNCLASSIFIED irreversible, not to the agent-declared class.
+- `merge_worstcase` — two recorders report the same event id, one POLICY-BOUND
+  reversible and one UNCLASSIFIED irreversible; the merge keeps the irreversible
+  worst case and the coverage rule reports a GAP.
 
 ## 7. Running it
 

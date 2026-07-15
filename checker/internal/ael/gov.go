@@ -3,6 +3,8 @@
 package ael
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 )
@@ -138,11 +140,10 @@ func governRun(art *Artifact, run string) GovRun {
 func classifyEvent(art *Artifact, rec *Record) *GovEvent {
 	ev := &GovEvent{EventID: rec.Payload.Event.ID, EventClass: rec.Payload.Event.Class}
 
-	pClass, pOK := policyBoundClass(art, rec)
-	dClassRaw, dOK := declaredClass(rec)
+	pClass, pState := policyBoundClass(art, rec)
 
-	switch {
-	case pOK:
+	switch pState {
+	case policyBoundOK:
 		class, known := normalizeClass(pClass)
 		ev.Status = GovPolicyBound
 		ev.Class = class
@@ -151,47 +152,76 @@ func classifyEvent(art *Artifact, rec *Record) *GovEvent {
 		}
 		// A softer agent-declared class over a policy-bound one is ignored, and
 		// said so out loud: this is the self-assertion the design forbids.
-		if dOK {
+		if dClassRaw, dOK := declaredClass(rec); dOK {
 			dClass, _ := normalizeClass(dClassRaw)
 			if revOrder[dClass] < revOrder[class] {
 				ev.Note = "agent-declared class " + dClass + " ignored; policy binds " + class
 			}
 		}
-	case dOK:
-		class, known := normalizeClass(dClassRaw)
-		ev.Status = GovDeclared
-		ev.Class = class
-		if !known {
-			ev.Note = "declared class outside vocabulary, treated as irreversible"
-		}
-	default:
+	case policyReferencedBad:
+		// The record referenced an enforcement policy the checker cannot
+		// hash-verify (missing, malformed, or hash-mismatched). The base R grade
+		// rejects exactly this, so governability must not fall through to the
+		// agent-declared class. Fail closed to unclassified-irreversible.
 		ev.Status = GovUnclassified
-		ev.Class = "irreversible" // fail closed
+		ev.Class = "irreversible"
+		ev.Note = "referenced policy missing, malformed, or hash-mismatched; treated as unclassified irreversible"
+	default: // policyNone: this event is not bound by a verified policy
+		if dClassRaw, dOK := declaredClass(rec); dOK {
+			class, known := normalizeClass(dClassRaw)
+			ev.Status = GovDeclared
+			ev.Class = class
+			if !known {
+				ev.Note = "declared class outside vocabulary, treated as irreversible"
+			}
+		} else {
+			ev.Status = GovUnclassified
+			ev.Class = "irreversible" // fail closed
+		}
 	}
 	return ev
 }
 
+// policyState distinguishes an event with no policy binding from one whose
+// referenced policy could not be hash-verified. The second case must fail closed:
+// falling back to the agent-declared class would be the self-assertion the base R
+// check already rejects.
+type policyState int
+
+const (
+	policyNone          policyState = iota // no policy reference, or a verified policy silent on this event class
+	policyReferencedBad                    // policy referenced but missing, malformed, or hash-mismatched
+	policyBoundOK                          // policy referenced, hash-verified, and it classifies this event
+)
+
 // policyBoundClass returns the reversibility class for a record's event, derived
-// from the signed decision's policy (a reversibility map keyed by event class).
-// Because the decision carries the policy hash and the policy bytes hash to it,
-// the class is bound to the enforcement policy at decision time.
-func policyBoundClass(art *Artifact, rec *Record) (string, bool) {
+// from the signed decision's policy (a reversibility map keyed by event class),
+// but ONLY after verifying the policy bytes hash to the hash the decision
+// committed to. A referenced policy whose bytes are missing, malformed, or do not
+// hash to the decision's policy hash returns policyReferencedBad so the caller
+// fails closed, never trusting policy input the base R check would reject.
+func policyBoundClass(art *Artifact, rec *Record) (string, policyState) {
 	if rec.Payload.Decision == nil || rec.Payload.Decision.Policy == "" {
-		return "", false
+		return "", policyNone
 	}
-	raw, ok := art.PolicyRaw[rec.Payload.Decision.Policy]
+	want := rec.Payload.Decision.Policy
+	raw, ok := art.PolicyRaw[want]
 	if !ok {
-		return "", false
+		return "", policyReferencedBad // policy bytes missing
+	}
+	sum := sha256.Sum256(raw)
+	if hex.EncodeToString(sum[:]) != want {
+		return "", policyReferencedBad // bytes do not hash to the decision's committed policy hash
 	}
 	var pr policyReversibility
 	if err := json.Unmarshal(raw, &pr); err != nil {
-		return "", false
+		return "", policyReferencedBad // malformed policy
 	}
 	class, ok := pr.Reversibility[rec.Payload.Event.Class]
 	if !ok {
-		return "", false
+		return "", policyNone // verified policy, but silent on this event class: not policy-bound
 	}
-	return class, true
+	return class, policyBoundOK
 }
 
 // declaredClass returns the agent-declared class from ext.gov.declared_reversibility.
@@ -208,12 +238,15 @@ func declaredClass(rec *Record) (string, bool) {
 }
 
 // mergeEvent reconciles two findings for the same event id across recorders,
-// keeping the stronger provenance and, on a tie, the least-reversible class.
+// keeping the worst case: most severe class first, then strongest provenance.
+// Ranking provenance above class severity would let a POLICY-BOUND reversible
+// record from one recorder mask an UNCLASSIFIED irreversible record for the same
+// event, laundering the riskier action out of coverage. Severity must win.
 func mergeEvent(a, b *GovEvent) *GovEvent {
-	if statusRank(b.Status) > statusRank(a.Status) {
+	if revOrder[b.Class] > revOrder[a.Class] {
 		return b
 	}
-	if statusRank(b.Status) == statusRank(a.Status) && revOrder[b.Class] > revOrder[a.Class] {
+	if revOrder[b.Class] == revOrder[a.Class] && statusRank(b.Status) > statusRank(a.Status) {
 		return b
 	}
 	return a

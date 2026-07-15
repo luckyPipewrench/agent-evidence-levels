@@ -571,6 +571,30 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		return nil, err
 	}
 
+	// governability merge worst-case: two recorders, same event id, POLICY-BOUND
+	// reversible on one and UNCLASSIFIED irreversible on the other. The merge must
+	// keep the irreversible worst case, which then trips the coverage GAP because
+	// the manifest's correspondence.classes deliberately omits the event class.
+	govMergeR1, err := buildRecords(priv, "run-gov-merge-worstcase", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", govDecision, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govMergeR2, err := buildRecords(rec2Priv, "run-gov-merge-worstcase", "r2", rec2FP, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		activity("2026-01-01T00:00:11Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govMergeCorr := map[string]any{"correspondence": map[string]any{"classes": []any{"dns"}, "match": "id"}}
+
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
@@ -630,6 +654,15 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		{name: "gov/unclassified", records: govUnclassified, expect: expect(1, "pending", map[string]string{"f": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}}, Coverage: "N/A"}},
 		{name: "gov/downgrade", records: govDowngrade, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},
 		{name: "gov/irreversible_scoped_out", recorderRecords: map[string][]signedRecord{"r1": govScopedR1, "r2": govScopedR2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}, "evt-2": {Status: "DECLARED", Class: "irreversible"}}, Coverage: "GAP", Gaps: []string{"evt-2"}}},
+		{name: "gov/merge_worstcase",
+			recorderRecords: map[string][]signedRecord{"r1": govMergeR1, "r2": govMergeR2},
+			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
+			policies:      map[string][]byte{govPolicyHash: govPolicyRaw},
+			manifestExtra: govMergeCorr, coverage: "enforced-total", custody: "same-operator",
+			expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS", "R": "UV"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}},
+				Coverage: "GAP", Gaps: []string{"evt-1"}}},
 	}, nil
 }
 

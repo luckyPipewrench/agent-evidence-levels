@@ -1,0 +1,9 @@
+{
+  "events": {
+    "evt-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "N/A"
+}
