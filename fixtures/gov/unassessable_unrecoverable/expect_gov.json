@@ -1,9 +1,9 @@
 {
   "events": {
     "evt-1": {
-      "status": "POLICY-INVALID",
+      "status": "UNASSESSABLE",
       "class": "irreversible"
     }
   },
-  "coverage": "N/A"
+  "coverage": "UNASSESSABLE"
 }

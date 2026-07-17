@@ -40,28 +40,35 @@ the signed payload bytes, the declared class is covered by the recorder signatur
 ## 3. Provenance statuses (reported outside the grade)
 
 For each activity event the governability duty reports one status. None of them is
-`PASS`/`FAIL`/`UV`, and none moves the AEL rung.
+`PASS`/`FAIL`/`UV`, and none moves the AEL rung. There are five source statuses
+plus `UNASSESSABLE` for a record that was kept but could not be classified.
 
-- **POLICY-BOUND.** The class is derived from the signed decision's policy (see
-  Section 4). This proves the classification came from the enforcement policy at
-  decision time, not from a later relabeling. It is provenance, not truth: it does
-  not prove the policy itself is correct.
-- **DECLARED.** The class comes from `ext.gov.declared_reversibility` and is not
-  bound to a policy. It is a signed claim with author provenance only.
-- **UNCLASSIFIED.** No class is present, or a referenced enforcement policy cannot
-  be hash-verified. The event is treated as `irreversible` for coverage (Section 5),
-  so an unlabeled or unverifiable-policy action cannot dodge the coverage rule.
+- **POLICY-BOUND.** A hash-verified enforcement policy assigns the class (see
+  Section 4). This is the only status that MAY lower an event's coverage below
+  irreversible (Section 5). It is provenance, not truth: it does not prove the
+  policy itself is correct, only that the class came from the enforcement policy at
+  decision time, not from a later relabeling.
+- **POLICY-SILENT.** The referenced policy hash-verifies, but it carries no class
+  for this event's class. The event is not policy-bound: it is treated as
+  `irreversible` for coverage, and any `ext.gov` agent declaration is advisory only
+  and never lowers the gate.
+- **POLICY-INVALID.** A policy was referenced but is missing, malformed,
+  hash-mismatched, or maps this event class to an out-of-vocabulary or empty value.
+  The base R check rejects exactly this input, so the duty must not fall back to
+  the agent-declared class. Treated as `irreversible`.
+- **DECLARED.** The class comes only from `ext.gov.declared_reversibility`, over an
+  empty or absent `decision.policy`. The declared class is reported for information,
+  but it is gated `irreversible` for coverage and never lowers the gate (Section 5).
+- **UNCLASSIFIED.** No class is present from any source. Treated as `irreversible`.
+- **UNASSESSABLE.** A schema-invalid activity record that was kept, not dropped
+  (Section 6). Its event id and class were recovered where possible and it is gated
+  `irreversible` against the recovered class. If the class was not recoverable the
+  run's coverage becomes `UNASSESSABLE` (Section 5), a failing state.
 
 When both a policy-bound class and an agent-declared class are present, the
 policy-bound class wins and the softer agent-declared value is reported as ignored.
 A securing runtime MUST NOT let an agent assert a class over the one the policy
 assigned.
-
-A record that references an enforcement policy whose bytes are missing, malformed,
-or do not hash to the decision's committed policy hash fails closed to UNCLASSIFIED
-irreversible. The base R check rejects exactly this input, so the governability duty
-must not fall back to the agent-declared class: falling open there would be the
-self-assertion the ladder already refuses.
 
 ## 4. Policy binding (strong form)
 
@@ -83,32 +90,70 @@ adding a new trust root.
 
 AEL-2's `correspondence.classes` is operator-declared, so an operator could scope
 the riskiest actions out of the corresponded set and keep the grade. The
-governability duty closes that with a fail-closed rule:
+governability duty closes that with a fail-closed **coverage invariant**:
 
-> Every event whose reversibility class is `irreversible`, including any
-> `UNCLASSIFIED` event treated as `irreversible`, MUST have its event class present
-> in `correspondence.classes`. An irreversible action whose class is absent from
-> the corresponded set is reported as a coverage `GAP`.
+> **MUST.** Only a POLICY-BOUND (hash-verified) class MAY lower an event's coverage
+> below irreversible. Every other status is irreversible for coverage. Concretely,
+> an event MUST have its event class present in `correspondence.classes` unless it
+> is POLICY-BOUND with a non-`irreversible` class. An event that must be covered but
+> whose class is absent from the corresponded set is reported as a coverage `GAP`.
+
+This is what makes the safety property un-removable by deleting its input. Blanking
+`decision.policy` drops an event to DECLARED, which reports the agent's declared
+class for information but is still gated `irreversible` for coverage, so it cannot
+dodge the rule. The same holds for POLICY-SILENT, POLICY-INVALID, UNCLASSIFIED, and
+UNASSESSABLE: none of them can lower the gate.
 
 With no correspondence declared the result is `N/A`, not a false `OK`.
 
-When more than one recorder reports the same event id, the duty reconciles them by
-keeping the worst case: the most severe reversibility class first, then the
+**Never drop a risky record.** A schema-invalid activity record is not silently
+removed from the report. If its event id and class are recoverable, it is reported
+UNASSESSABLE, gated `irreversible` against the recovered class, and the schema error
+is attached to the finding's note. If the class is not recoverable, the run's
+coverage is `UNASSESSABLE`, never `OK` and never `N/A`. `UNASSESSABLE` fails the
+gate; it is not an N/A. (Signature- or canonical-unverified records remain a rung
+problem and are left to the base grade, not carried into the governability report.)
+
+**Merge across recorders is a union.** When more than one recorder reports the same
+event id, the duty covers the **union** of the event classes seen for that id, so
+coverage cannot flip with record order when two recorders disagree. The surviving
+finding keeps the worst case: the most severe reversibility class first, then the
 strongest provenance. Ranking provenance above class severity would let a
 POLICY-BOUND `reversible` record from one recorder mask an UNCLASSIFIED
 `irreversible` record for the same event, laundering the riskier action out of
 coverage. Severity wins so the coverage rule always sees the least-reversible view.
 
+**DUPLICATE-ID-CLASS-CONFLICT.** When two recorders report the same event id with
+different `event.class` values, the duty raises a `DUPLICATE-ID-CLASS-CONFLICT`
+anomaly for that id, reported in `coverage.anomalies`, **even when the union of
+classes is fully covered**. Two recorders disagreeing on what an event was is a
+finding in its own right, independent of whether coverage passed.
+
+### AEL's own rule, not AISVS
+
+The "unclassified is treated as the strictest class (`irreversible`) for coverage"
+rule, and the coverage invariant that only a POLICY-BOUND class may lower the gate,
+are **AEL's own rules**. They are the fail-closed default this extension defines.
+AISVS C9.2.3 supplies only the four-value reversibility **vocabulary**; it does not
+state that an unclassified action must be treated as irreversible, nor does it
+define this coverage gate. AEL adopts the strictest-default treatment so an
+unlabeled or unverifiable action cannot be laundered out of scope.
+
 ## 6. Conformance
 
 An implementation conforms if, over the signed artifact:
 
-1. every activity event is reported as POLICY-BOUND, DECLARED, or UNCLASSIFIED per
-   Sections 3 and 4;
+1. every activity event is reported as POLICY-BOUND, POLICY-SILENT, POLICY-INVALID,
+   DECLARED, UNCLASSIFIED, or UNASSESSABLE per Sections 3 and 4;
 2. a class outside the four-value vocabulary, or an absent class, is treated as
-   `irreversible`;
+   `irreversible`, and an out-of-vocabulary or empty policy value is reported
+   POLICY-INVALID (never a mislabeled POLICY-BOUND);
 3. a policy-bound class is never overridden by an agent-declared class;
-4. the AEL-2 coverage rule of Section 5 holds.
+4. the coverage invariant of Section 5 holds: only a POLICY-BOUND non-`irreversible`
+   class may lower the gate; a schema-invalid record is kept as UNASSESSABLE rather
+   than dropped; an unrecoverable class makes the run's coverage `UNASSESSABLE`; and
+   a duplicate id with conflicting `event.class` covers the union and raises
+   `DUPLICATE-ID-CLASS-CONFLICT`.
 
 The reference corpus ships these fixtures under `fixtures/gov/`, asserted by
 `TestGovernabilityCorpus`:
@@ -128,6 +173,23 @@ The reference corpus ships these fixtures under `fixtures/gov/`, asserted by
 - `merge_worstcase` — two recorders report the same event id, one POLICY-BOUND
   reversible and one UNCLASSIFIED irreversible; the merge keeps the irreversible
   worst case and the coverage rule reports a GAP.
+- `declared_no_lower` — an empty/absent `decision.policy` with an agent-declared
+  `reversible` class reports DECLARED but is gated irreversible for coverage, so its
+  event class left out of `correspondence.classes` is caught as a GAP. This pins the
+  coverage invariant: blanking the policy input cannot turn the safety property off.
+- `policy_silent` — a hash-verified policy that is silent on the event's class
+  reports POLICY-SILENT irreversible.
+- `policy_invalid_value` — a hash-verified policy mapping the event class to an
+  out-of-vocabulary value reports POLICY-INVALID irreversible, not a mislabeled
+  POLICY-BOUND.
+- `unassessable_recoverable` — a schema-invalid activity record with a recoverable
+  event id and class is kept as UNASSESSABLE, gated irreversible, and its class
+  checked against correspondence (a GAP), never dropped.
+- `unassessable_unrecoverable` — a schema-invalid activity record whose event class
+  cannot be recovered makes the run's coverage UNASSESSABLE.
+- `dup_id_class_conflict` — two recorders report the same event id with different
+  `event.class`; the union is covered and a DUPLICATE-ID-CLASS-CONFLICT anomaly is
+  raised even though coverage is OK.
 
 ## 7. Running it
 

@@ -1,0 +1,13 @@
+{
+  "runs": [
+    {
+      "id": "run-gov-policy-invalid-value",
+      "grade": 1,
+      "r": "+R",
+      "must": {
+        "R": "PASS"
+      }
+    }
+  ],
+  "note": ""
+}

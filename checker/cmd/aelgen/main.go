@@ -77,9 +77,10 @@ type caseDef struct {
 // govExpectation is the expected governability output for a fixture, written to
 // expect_gov.json and asserted by the governability conformance test.
 type govExpectation struct {
-	Events   map[string]govEventExpect `json:"events"`
-	Coverage string                    `json:"coverage,omitempty"`
-	Gaps     []string                  `json:"gaps,omitempty"`
+	Events    map[string]govEventExpect `json:"events"`
+	Coverage  string                    `json:"coverage,omitempty"`
+	Gaps      []string                  `json:"gaps,omitempty"`
+	Anomalies []string                  `json:"anomalies,omitempty"`
 }
 
 type govEventExpect struct {
@@ -595,6 +596,114 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	}
 	govMergeCorr := map[string]any{"correspondence": map[string]any{"classes": []any{"dns"}, "match": "id"}}
 
+	// round-2 governability fixtures
+
+	// (a) empty/absent decision.policy with an agent-declared reversible class.
+	// DECLARED reports the declared class but MUST NOT lower the coverage gate:
+	// the event class is left out of correspondence.classes so the invariant fires
+	// a GAP even though the declared class is reversible. This is the exact
+	// empty-policy bypass the invariant closes.
+	govDeclaredNoLowerR1, err := buildRecords(priv, "run-gov-declared-no-lower", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		govActivity("2026-01-01T00:00:10Z", "pay", "evt-1", "out", nil, "reversible"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govDeclaredNoLowerR2, err := buildRecords(rec2Priv, "run-gov-declared-no-lower", "r2", rec2FP, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		govActivity("2026-01-01T00:00:11Z", "pay", "evt-1", "out", nil, "reversible"),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// (b) POLICY-SILENT: a hash-verified policy that is silent on the event class.
+	govSilentHash, govSilentRaw, err := govSilentPolicyFixture()
+	if err != nil {
+		return nil, err
+	}
+	govSilentDecision := map[string]any{"policy": govSilentHash, "request_fp": "fp-gov-silent", "inputs": map[string]any{}, "verdict": "allow"}
+	govPolicySilent, err := buildRecords(priv, "run-gov-policy-silent", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "dns", "evt-1", "out", govSilentDecision, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// (c) POLICY-INVALID via an out-of-vocabulary policy value.
+	govInvalidHash, govInvalidRaw, err := govInvalidValuePolicyFixture()
+	if err != nil {
+		return nil, err
+	}
+	govInvalidDecision := map[string]any{"policy": govInvalidHash, "request_fp": "fp-gov-invalid", "inputs": map[string]any{}, "verdict": "allow"}
+	govPolicyInvalidValue, err := buildRecords(priv, "run-gov-policy-invalid-value", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", govInvalidDecision, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// (d) UNASSESSABLE with a recoverable class: schema-invalid activity record
+	// (unknown top-level key) that still verifies at the rung. The event id and
+	// class are recovered, so it is reported UNASSESSABLE gated irreversible and
+	// its class is checked against correspondence (left out -> GAP).
+	govUnassessableRecoverable, err := buildRecords(priv, "run-gov-unassessable-recoverable", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		schemaInvalidActivity("2026-01-01T00:00:10Z", "pay", "evt-1", "out"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// (e) UNASSESSABLE with an unrecoverable class: schema-invalid activity whose
+	// event object omits class, so the run's coverage becomes UNASSESSABLE.
+	govUnassessableUnrecoverable, err := buildRecords(priv, "run-gov-unassessable-unrecoverable", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		schemaInvalidNoClassActivity("2026-01-01T00:00:10Z", "evt-1", "out"),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// (f) DUPLICATE-ID-CLASS-CONFLICT: two recorders, same event id, different
+	// event.class. The duty covers the union of classes and raises the anomaly.
+	govConflictR1, err := buildRecords(priv, "run-gov-dup-id-conflict", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	govConflictR2, err := buildRecords(rec2Priv, "run-gov-dup-id-conflict", "r2", rec2FP, []recordPlan{
+		open("2026-01-01T00:00:01Z", 60, 5),
+		activity("2026-01-01T00:00:11Z", "pay", "evt-1", "out", nil, nil),
+		heartbeat("2026-01-01T00:00:31Z"),
+		closePlan("2026-01-01T00:00:41Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	// correspondence covers both classes so the union is fully covered; the anomaly
+	// must still be raised even though coverage is OK.
+	govConflictCorr := map[string]any{"correspondence": map[string]any{"classes": []any{"net", "pay"}, "match": "id"}}
+
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
@@ -663,6 +772,49 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}},
 				Coverage: "GAP", Gaps: []string{"evt-1"}}},
+		{name: "gov/declared_no_lower",
+			recorderRecords: map[string][]signedRecord{"r1": govDeclaredNoLowerR1, "r2": govDeclaredNoLowerR2},
+			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
+			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
+			expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "DECLARED", Class: "reversible"}},
+				Coverage: "GAP", Gaps: []string{"evt-1"}}},
+		{name: "gov/policy_silent", records: govPolicySilent, policies: map[string][]byte{govSilentHash: govSilentRaw},
+			expect: expect(1, "+R", map[string]string{"R": "PASS"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "POLICY-SILENT", Class: "irreversible"}},
+				Coverage: "N/A"}},
+		{name: "gov/policy_invalid_value", records: govPolicyInvalidValue, policies: map[string][]byte{govInvalidHash: govInvalidRaw},
+			expect: expect(1, "+R", map[string]string{"R": "PASS"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "POLICY-INVALID", Class: "irreversible"}},
+				Coverage: "N/A"}},
+		{name: "gov/unassessable_recoverable",
+			recorderRecords: map[string][]signedRecord{"r1": govUnassessableRecoverable},
+			recorderKeys:    map[string]string{"r1": fp}, keys: map[string]ed25519.PublicKey{fp: pub},
+			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
+			expect: expect("ungraded", "pending", map[string]string{"w": "FAIL"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "UNASSESSABLE", Class: "irreversible"}},
+				Coverage: "GAP", Gaps: []string{"evt-1"}}},
+		{name: "gov/unassessable_unrecoverable",
+			recorderRecords: map[string][]signedRecord{"r1": govUnassessableUnrecoverable},
+			recorderKeys:    map[string]string{"r1": fp}, keys: map[string]ed25519.PublicKey{fp: pub},
+			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
+			expect: expect("ungraded", "pending", map[string]string{"w": "FAIL"}),
+			govExpect: &govExpectation{
+				Events:   map[string]govEventExpect{"evt-1": {Status: "UNASSESSABLE", Class: "irreversible"}},
+				Coverage: "UNASSESSABLE"}},
+		{name: "gov/dup_id_class_conflict",
+			recorderRecords: map[string][]signedRecord{"r1": govConflictR1, "r2": govConflictR2},
+			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
+			manifestExtra: govConflictCorr, coverage: "enforced-total", custody: "same-operator",
+			expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}),
+			govExpect: &govExpectation{
+				Events:    map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}},
+				Coverage:  "OK",
+				Anomalies: []string{"DUPLICATE-ID-CLASS-CONFLICT: evt-1"}}},
 	}, nil
 }
 
@@ -959,6 +1111,58 @@ func govPolicyFixture() (string, []byte, error) {
 func govActivity(ts, class, id, dir string, decision map[string]any, declared string) recordPlan {
 	extra := eventExtra(class, id, dir, decision)
 	extra["ext"] = map[string]any{"gov": map[string]any{"declared_reversibility": declared}}
+	return recordPlan{typ: "activity", ts: ts, extra: extra}
+}
+
+// govSilentPolicyFixture is a hash-verified policy that carries a reversibility
+// map, but one that is silent on the event class used by the POLICY-SILENT
+// fixture (it maps only "pay", while that fixture's event class is "dns"). The
+// governability duty must report POLICY-SILENT and gate irreversible.
+func govSilentPolicyFixture() (string, []byte, error) {
+	raw, err := canonicalValue(map[string]any{
+		"v":             1,
+		"rules":         []any{},
+		"default":       "allow",
+		"reversibility": map[string]any{"pay": "reversible"},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return shaHex(raw), raw, nil
+}
+
+// govInvalidValuePolicyFixture is a hash-verified policy whose reversibility map
+// assigns an out-of-vocabulary value to the event class. The class is already
+// irreversible; the status must be POLICY-INVALID, not a mislabeled POLICY-BOUND.
+func govInvalidValuePolicyFixture() (string, []byte, error) {
+	raw, err := canonicalValue(map[string]any{
+		"v":             1,
+		"rules":         []any{},
+		"default":       "allow",
+		"reversibility": map[string]any{"net": "maybe-reversible"},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return shaHex(raw), raw, nil
+}
+
+// schemaInvalidActivity is an activity plan carrying an unknown top-level key.
+// The bytes are still signed and canonical, so the record verifies at the rung
+// (signature + canonical) but fails schema validation. The event id and class
+// remain recoverable, so the governability duty reports UNASSESSABLE gated
+// irreversible rather than dropping the record.
+func schemaInvalidActivity(ts, class, id, dir string) recordPlan {
+	extra := eventExtra(class, id, dir, nil)
+	extra["surprise"] = "unknown-top-level-key"
+	return recordPlan{typ: "activity", ts: ts, extra: extra}
+}
+
+// schemaInvalidNoClassActivity is a schema-invalid activity record whose event
+// object omits the required class. Neither schema validation nor class recovery
+// can succeed, so the run's coverage becomes UNASSESSABLE.
+func schemaInvalidNoClassActivity(ts, id, dir string) recordPlan {
+	extra := map[string]any{"event": map[string]any{"id": id, "dir": dir}}
 	return recordPlan{typ: "activity", ts: ts, extra: extra}
 }
 

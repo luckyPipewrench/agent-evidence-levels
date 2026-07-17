@@ -17,9 +17,10 @@ type govEventWant struct {
 }
 
 type govWant struct {
-	Events   map[string]govEventWant `json:"events"`
-	Coverage string                  `json:"coverage"`
-	Gaps     []string                `json:"gaps"`
+	Events    map[string]govEventWant `json:"events"`
+	Coverage  string                  `json:"coverage"`
+	Gaps      []string                `json:"gaps"`
+	Anomalies []string                `json:"anomalies"`
 }
 
 // TestGovernabilityCorpus grades every fixture that ships an expect_gov.json
@@ -86,6 +87,9 @@ func TestGovernabilityCorpus(t *testing.T) {
 			}
 			if !govEqualStrings(run.Coverage.Gaps, want.Gaps) {
 				t.Fatalf("%s: coverage gaps = %v, want %v", e.Name(), run.Coverage.Gaps, want.Gaps)
+			}
+			if want.Anomalies != nil && !govEqualStrings(run.Coverage.Anomalies, want.Anomalies) {
+				t.Fatalf("%s: coverage anomalies = %v, want %v", e.Name(), run.Coverage.Anomalies, want.Anomalies)
 			}
 		}
 	}

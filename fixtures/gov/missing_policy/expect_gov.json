@@ -1,7 +1,7 @@
 {
   "events": {
     "evt-1": {
-      "status": "UNCLASSIFIED",
+      "status": "POLICY-INVALID",
       "class": "irreversible"
     }
   },
