@@ -1,0 +1,12 @@
+{
+  "events": {
+    "evt-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "OK",
+  "anomalies": [
+    "DUPLICATE-ID-CLASS-CONFLICT: evt-1"
+  ]
+}

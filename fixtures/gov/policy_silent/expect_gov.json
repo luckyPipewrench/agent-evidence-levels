@@ -1,0 +1,9 @@
+{
+  "events": {
+    "evt-1": {
+      "status": "POLICY-SILENT",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "N/A"
+}

@@ -1,0 +1,15 @@
+{
+  "runs": [
+    {
+      "id": "run-gov-scoped-out",
+      "grade": 2,
+      "r": "pending",
+      "must": {
+        "k": "PASS",
+        "l": "PASS",
+        "m": "PASS"
+      }
+    }
+  ],
+  "note": ""
+}

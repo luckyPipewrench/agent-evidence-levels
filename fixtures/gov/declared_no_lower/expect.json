@@ -1,0 +1,15 @@
+{
+  "runs": [
+    {
+      "id": "run-gov-declared-no-lower",
+      "grade": 2,
+      "r": "pending",
+      "must": {
+        "k": "PASS",
+        "l": "PASS",
+        "m": "PASS"
+      }
+    }
+  ],
+  "note": ""
+}
