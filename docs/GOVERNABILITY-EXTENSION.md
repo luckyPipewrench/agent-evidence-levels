@@ -166,10 +166,10 @@ The reference corpus ships these fixtures under `fixtures/gov/`, asserted by
 - `irreversible_scoped_out` — an irreversible action whose class is left out of
   `correspondence.classes` is caught as a coverage GAP.
 - `hash_mismatch` — a record referencing a policy whose bytes do not hash to the
-  decision's committed hash fails closed to UNCLASSIFIED irreversible, never
+  decision's committed hash fails closed to POLICY-INVALID irreversible, never
   trusting the tampered policy's class.
 - `missing_policy` — a record referencing a policy whose bytes are absent fails
-  closed to UNCLASSIFIED irreversible, not to the agent-declared class.
+  closed to POLICY-INVALID irreversible, not to the agent-declared class.
 - `merge_worstcase` — two recorders report the same event id, one POLICY-BOUND
   reversible and one UNCLASSIFIED irreversible; the merge keeps the irreversible
   worst case and the coverage rule reports a GAP.

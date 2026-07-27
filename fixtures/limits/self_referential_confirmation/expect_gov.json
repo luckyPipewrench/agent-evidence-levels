@@ -1,0 +1,17 @@
+{
+  "events": {
+    "report-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    },
+    "status-read-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    },
+    "status-write-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "N/A"
+}

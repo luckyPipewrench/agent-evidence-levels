@@ -44,7 +44,7 @@
     },
     "count": { "type": "integer", "minimum": 2, "description": "close only: total records in this (run,recorder) including open and close" },
     "head": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "close only: hex SHA-256 of the record at seq=count-2" },
-    "ext": { "type": "object", "description": "reserved opaque forward-compat namespace; never read or graded by the checker" }
+    "ext": { "type": "object", "description": "reserved forward-compat namespace; opaque to the base rung, which never reads or grades it. Opt-in extensions may claim a sub-namespace: the governability extension reads ext.gov (docs/GOVERNABILITY-EXTENSION.md). See schema/README.md for the sub-namespace list." }
   },
   "allOf": [
     {

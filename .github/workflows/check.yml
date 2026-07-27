@@ -35,3 +35,7 @@ jobs:
       - name: Fixture conformance
         run: make check
 
+      - name: Fixtures are generator-reproducible
+        run: |
+          git diff --exit-code HEAD -- fixtures/
+          test -z "$(git status --porcelain --untracked-files=all --ignored=matching -- fixtures/)"

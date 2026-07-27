@@ -72,6 +72,8 @@ type caseDef struct {
 	coverage        string
 	custody         string
 	govExpect       *govExpectation
+	limitScenario   map[string]any
+	readme          string
 }
 
 // govExpectation is the expected governability output for a fixture, written to
@@ -519,6 +521,18 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	if err != nil {
 		return nil, err
 	}
+	govTamperedPolicyRaw, err := canonicalValue(map[string]any{
+		"v":       1,
+		"rules":   []any{},
+		"default": "allow",
+		"reversibility": map[string]any{
+			"pay": "reversible",
+			"net": "reversible",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
 	govDecision := map[string]any{"policy": govPolicyHash, "request_fp": "fp-gov", "inputs": map[string]any{}, "verdict": "allow"}
 	govPolicyBound, err := buildRecords(priv, "run-gov-policy-bound", "r1", fp, []recordPlan{
 		open("2026-01-01T00:00:00Z", 60, 5),
@@ -704,6 +718,59 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	// must still be raised even though coverage is OK.
 	govConflictCorr := map[string]any{"correspondence": map[string]any{"classes": []any{"net", "pay"}, "match": "id"}}
 
+	bornWrong, err := buildRecords(priv, "run-limit-born-wrong", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		fixtureActivity("2026-01-01T00:00:10Z", "tool", "tool-write-1", "internal", map[string]any{
+			"kind": "tool_result",
+			"tool": "write_file",
+			"result": map[string]any{
+				"path":            "/work/report.txt",
+				"write_succeeded": false,
+				"error":           "permission denied",
+			},
+		}),
+		fixtureActivity("2026-01-01T00:00:20Z", "report", "report-1", "out", map[string]any{
+			"kind": "agent_claim",
+			"claim": map[string]any{
+				"path":            "/work/report.txt",
+				"write_succeeded": true,
+			},
+		}),
+		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	selfConfirmation, err := buildRecords(priv, "run-limit-self-confirmation", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		fixtureActivity("2026-01-01T00:00:10Z", "report", "status-write-1", "internal", map[string]any{
+			"kind":                    "agent_authored_status",
+			"path":                    "/work/status.json",
+			"status":                  "healthy",
+			"independently_confirmed": false,
+		}),
+		fixtureActivity("2026-01-01T00:00:20Z", "tool", "status-read-1", "internal", map[string]any{
+			"kind":   "read_back",
+			"path":   "/work/status.json",
+			"status": "healthy",
+			"source": "same_agent",
+		}),
+		fixtureActivity("2026-01-01T00:00:30Z", "report", "report-1", "out", map[string]any{
+			"kind": "agent_claim",
+			"claim": map[string]any{
+				"path":                    "/work/status.json",
+				"independently_confirmed": true,
+				"status":                  "healthy",
+			},
+		}),
+		heartbeat("2026-01-01T00:00:40Z"),
+		closePlan("2026-01-01T00:00:50Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
@@ -758,55 +825,138 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 			{ID: "run-mixed-a", Grade: 2, R: "pending", Must: map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}},
 			{ID: "run-mixed-b", Grade: 0, R: "pending", Must: map[string]string{"j": "FAIL"}},
 		})},
+		{
+			name: "limits/born_wrong_tool_result", records: bornWrong,
+			expect: expect(1, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS", "f": "PASS", "g": "PASS", "h": "PASS", "i": "PASS", "w": "PASS"}),
+			limitScenario: map[string]any{
+				"case":         "limits/born_wrong_tool_result",
+				"ground_truth": map[string]any{"write_succeeded": false},
+				"contradicting_evidence": []any{
+					map[string]any{"event_id": "tool-write-1", "fact": "write_succeeded", "value": false},
+					map[string]any{"event_id": "tool-write-1", "fact": "path", "value": "/work/report.txt"},
+				},
+				"recorded_claim": []any{
+					map[string]any{"event_id": "report-1", "fact": "write_succeeded", "value": true},
+					map[string]any{"event_id": "report-1", "fact": "path", "value": "/work/report.txt"},
+				},
+				"bound_facts":    []any{"path"},
+				"expected_grade": 1,
+				"interpretation": "AEL verifies that the signed claim was recorded intact; it does not make the claim true.",
+			},
+			// Pins that the fixture narrative in ext.fixture carries no governability
+			// meaning. ext.gov is a graded sub-namespace; ext.fixture must never
+			// become one by accident.
+			govExpect: &govExpectation{
+				Events: map[string]govEventExpect{
+					"tool-write-1": {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"report-1":     {Status: "UNCLASSIFIED", Class: "irreversible"},
+				},
+				Coverage: "N/A",
+			},
+		},
+		{
+			name: "limits/self_referential_confirmation", records: selfConfirmation,
+			expect: expect(1, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS", "f": "PASS", "g": "PASS", "h": "PASS", "i": "PASS", "w": "PASS"}),
+			limitScenario: map[string]any{
+				"case":         "limits/self_referential_confirmation",
+				"ground_truth": map[string]any{"independently_confirmed": false},
+				"contradicting_evidence": []any{
+					map[string]any{"event_id": "status-write-1", "fact": "independently_confirmed", "value": false},
+					map[string]any{"event_id": "status-write-1", "fact": "path", "value": "/work/status.json"},
+					map[string]any{"event_id": "status-read-1", "fact": "source", "value": "same_agent"},
+					map[string]any{"event_id": "status-read-1", "fact": "path", "value": "/work/status.json"},
+				},
+				"recorded_claim": []any{
+					map[string]any{"event_id": "report-1", "fact": "independently_confirmed", "value": true},
+					map[string]any{"event_id": "report-1", "fact": "path", "value": "/work/status.json"},
+				},
+				"bound_facts":    []any{"path"},
+				"expected_grade": 1,
+				"interpretation": "Reading back an agent-authored status file is not independent confirmation, even when the read and claim are faithfully recorded.",
+			},
+			govExpect: &govExpectation{
+				Events: map[string]govEventExpect{
+					"status-write-1": {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"status-read-1":  {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"report-1":       {Status: "UNCLASSIFIED", Class: "irreversible"},
+				},
+				Coverage: "N/A",
+			},
+		},
 		{name: "gov/policy_bound", records: govPolicyBound, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},
 		{name: "gov/declared", records: govDeclared, expect: expect(1, "pending", map[string]string{"f": "PASS", "w": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "DECLARED", Class: "reversible"}}, Coverage: "N/A"}},
 		{name: "gov/unclassified", records: govUnclassified, expect: expect(1, "pending", map[string]string{"f": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}}, Coverage: "N/A"}},
 		{name: "gov/downgrade", records: govDowngrade, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},
+		{name: "gov/hash_mismatch", records: govPolicyBound, policies: map[string][]byte{govPolicyHash: govTamperedPolicyRaw}, expect: expect(1, "fail", map[string]string{"R": "FAIL"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-INVALID", Class: "irreversible"}}, Coverage: "N/A"}},
+		{name: "gov/missing_policy", records: govDowngrade, expect: expect(1, "fail", map[string]string{"R": "FAIL"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-INVALID", Class: "irreversible"}}, Coverage: "N/A"}},
 		{name: "gov/irreversible_scoped_out", recorderRecords: map[string][]signedRecord{"r1": govScopedR1, "r2": govScopedR2}, recorderKeys: map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys, manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator", expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}, "evt-2": {Status: "DECLARED", Class: "irreversible"}}, Coverage: "GAP", Gaps: []string{"evt-2"}}},
-		{name: "gov/merge_worstcase",
+		{
+			name:            "gov/merge_worstcase",
 			recorderRecords: map[string][]signedRecord{"r1": govMergeR1, "r2": govMergeR2},
 			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
 			policies:      map[string][]byte{govPolicyHash: govPolicyRaw},
 			manifestExtra: govMergeCorr, coverage: "enforced-total", custody: "same-operator",
 			expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS", "R": "UV"}),
+			readme: "<!-- SPDX-License-Identifier: Apache-2.0 -->\n\n# gov/merge_worstcase\n\n" +
+				"Two independent recorders report the same event. One classifies it as POLICY-BOUND " +
+				"reversible; the other leaves it UNCLASSIFIED and therefore irreversible. The merged " +
+				"result must keep the irreversible worst case and report a coverage GAP.\n",
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}},
-				Coverage: "GAP", Gaps: []string{"evt-1"}}},
-		{name: "gov/declared_no_lower",
+				Coverage: "GAP", Gaps: []string{"evt-1"},
+			},
+		},
+		{
+			name:            "gov/declared_no_lower",
 			recorderRecords: map[string][]signedRecord{"r1": govDeclaredNoLowerR1, "r2": govDeclaredNoLowerR2},
 			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
 			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
 			expect: expect(2, "pending", map[string]string{"k": "PASS", "l": "PASS", "m": "PASS"}),
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "DECLARED", Class: "reversible"}},
-				Coverage: "GAP", Gaps: []string{"evt-1"}}},
-		{name: "gov/policy_silent", records: govPolicySilent, policies: map[string][]byte{govSilentHash: govSilentRaw},
+				Coverage: "GAP", Gaps: []string{"evt-1"},
+			},
+		},
+		{
+			name: "gov/policy_silent", records: govPolicySilent, policies: map[string][]byte{govSilentHash: govSilentRaw},
 			expect: expect(1, "+R", map[string]string{"R": "PASS"}),
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "POLICY-SILENT", Class: "irreversible"}},
-				Coverage: "N/A"}},
-		{name: "gov/policy_invalid_value", records: govPolicyInvalidValue, policies: map[string][]byte{govInvalidHash: govInvalidRaw},
+				Coverage: "N/A",
+			},
+		},
+		{
+			name: "gov/policy_invalid_value", records: govPolicyInvalidValue, policies: map[string][]byte{govInvalidHash: govInvalidRaw},
 			expect: expect(1, "+R", map[string]string{"R": "PASS"}),
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "POLICY-INVALID", Class: "irreversible"}},
-				Coverage: "N/A"}},
-		{name: "gov/unassessable_recoverable",
+				Coverage: "N/A",
+			},
+		},
+		{
+			name:            "gov/unassessable_recoverable",
 			recorderRecords: map[string][]signedRecord{"r1": govUnassessableRecoverable},
 			recorderKeys:    map[string]string{"r1": fp}, keys: map[string]ed25519.PublicKey{fp: pub},
 			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
 			expect: expect("ungraded", "pending", map[string]string{"w": "FAIL"}),
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "UNASSESSABLE", Class: "irreversible"}},
-				Coverage: "GAP", Gaps: []string{"evt-1"}}},
-		{name: "gov/unassessable_unrecoverable",
+				Coverage: "GAP", Gaps: []string{"evt-1"},
+			},
+		},
+		{
+			name:            "gov/unassessable_unrecoverable",
 			recorderRecords: map[string][]signedRecord{"r1": govUnassessableUnrecoverable},
 			recorderKeys:    map[string]string{"r1": fp}, keys: map[string]ed25519.PublicKey{fp: pub},
 			manifestExtra: ael2Extra, coverage: "enforced-total", custody: "same-operator",
 			expect: expect("ungraded", "pending", map[string]string{"w": "FAIL"}),
 			govExpect: &govExpectation{
 				Events:   map[string]govEventExpect{"evt-1": {Status: "UNASSESSABLE", Class: "irreversible"}},
-				Coverage: "UNASSESSABLE"}},
-		{name: "gov/dup_id_class_conflict",
+				Coverage: "UNASSESSABLE",
+			},
+		},
+		{
+			name:            "gov/dup_id_class_conflict",
 			recorderRecords: map[string][]signedRecord{"r1": govConflictR1, "r2": govConflictR2},
 			recorderKeys:    map[string]string{"r1": fp, "r2": rec2FP}, keys: multiKeys,
 			manifestExtra: govConflictCorr, coverage: "enforced-total", custody: "same-operator",
@@ -814,7 +964,9 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 			govExpect: &govExpectation{
 				Events:    map[string]govEventExpect{"evt-1": {Status: "UNCLASSIFIED", Class: "irreversible"}},
 				Coverage:  "OK",
-				Anomalies: []string{"DUPLICATE-ID-CLASS-CONFLICT: evt-1"}}},
+				Anomalies: []string{"DUPLICATE-ID-CLASS-CONFLICT: evt-1"},
+			},
+		},
 	}, nil
 }
 
@@ -990,6 +1142,20 @@ func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
 			return err
 		}
 	}
+	if c.limitScenario != nil {
+		scenarioRaw, err := json.MarshalIndent(c.limitScenario, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(caseDir, "scenario.json"), append(scenarioRaw, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	if c.readme != "" {
+		if err := os.WriteFile(filepath.Join(caseDir, "README.md"), []byte(c.readme), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1046,6 +1212,12 @@ func openNonce(ts string, hmax, htol int, nonce string) recordPlan {
 
 func activity(ts, class, id, dir string, decision map[string]any, patch func([]byte) []byte) recordPlan {
 	return recordPlan{typ: "activity", ts: ts, extra: eventExtra(class, id, dir, decision), rawPatch: patch}
+}
+
+func fixtureActivity(ts, class, id, dir string, fixture map[string]any) recordPlan {
+	extra := eventExtra(class, id, dir, nil)
+	extra["ext"] = map[string]any{"fixture": fixture}
+	return recordPlan{typ: "activity", ts: ts, extra: extra}
 }
 
 func heartbeat(ts string) recordPlan {

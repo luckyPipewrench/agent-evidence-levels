@@ -137,6 +137,14 @@ asserts each case matches its `expect.json`.
 | `r/verdict_mismatch` | — | R2 | r fail |
 | `multi_run/mixed` | AEL-2 / AEL-0 | per-run grading | run A grades AEL-2; run B missing close grades AEL-0 |
 | `multi_run/manifest_omits_bad_run` | AEL-2 / AEL-0 | per-run grading | run B is still emitted and capped even when omitted from `manifest.runs` |
+| `limits/born_wrong_tool_result` | AEL-1 | truth limitation | a failed tool call followed by a signed success claim still grades AEL-1; integrity preserves the false claim but does not make it true |
+| `limits/self_referential_confirmation` | AEL-1 | provenance limitation | reading an agent-authored status file back as “independent” confirmation still grades AEL-1; signature and order do not create source independence |
 
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
 expected is the proof the standard is earned, not asserted.
+
+Limitation cases also carry `scenario.json`, a harness-only file. It names ground-truth premises, the
+signed facts that contradict the false claim, the subject facts that must agree across the evidence and
+the claim, and the expected grade. The harness resolves each named fact in the event's signed `ext` and
+requires exactly one occurrence, so a fact that appeared twice fails rather than matching whichever copy
+was reached first. `scenario.json` is not checker input and cannot raise or lower a grade.
