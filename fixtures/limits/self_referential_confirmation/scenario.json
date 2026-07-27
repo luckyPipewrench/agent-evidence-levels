@@ -35,6 +35,11 @@
       "event_id": "report-1",
       "fact": "independently_confirmed",
       "value": true
+    },
+    {
+      "event_id": "report-1",
+      "fact": "path",
+      "value": "/work/status.json"
     }
   ]
 }

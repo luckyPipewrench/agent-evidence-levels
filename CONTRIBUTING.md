@@ -33,7 +33,10 @@ make check
 that each result matches `expect.json`.
 
 The `fixtures/` tree is generator-owned. Add or change cases in
-`checker/cmd/aelgen`; `make gen` replaces the tree and discards hand edits.
+`checker/cmd/aelgen`; `make gen` replaces the tree and discards hand edits. If the
+generator cannot express the case you need, extend the generator or open an issue.
+Hand-authoring a fixture is not a workaround: CI regenerates the tree and fails on
+any difference.
 
 ## DCO and inbound licensing
 

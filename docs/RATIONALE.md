@@ -33,6 +33,12 @@ status file the same agent wrote does not turn that file into independent confir
 verify its evidence mechanics, while `scenario.json` binds the contradictory evidence and false claim to
 exact signed events without treating either as a grading input.
 
+Both cases carry their contradiction in `ext`, and that is the honest shape of the limit rather than a
+convenience. The record schema has no graded field in which a tool's semantics could be stated at all:
+an event carries a class, an id, and a direction, and nothing else. So this class of falsehood is
+undetectable by construction, not by omission. A checker that claimed otherwise would be claiming to
+grade a field the format does not have.
+
 This is not a checker escape hatch. It is the boundary the checker must report honestly. AEL says what
 was recorded, how omission-evident that record is, and which narrow confirmations exist. It does not
 certify arbitrary correspondence between a recorded claim and the world. AEL-4 strengthens specific

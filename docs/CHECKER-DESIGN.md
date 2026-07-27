@@ -143,6 +143,8 @@ asserts each case matches its `expect.json`.
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
 expected is the proof the standard is earned, not asserted.
 
-Limitation cases also carry `scenario.json`, a harness-only file. It names ground-truth premises,
-exact signed facts that contradict the false claim, any facts that must agree across events, and the
-expected grade. It is not checker input and cannot raise or lower a grade.
+Limitation cases also carry `scenario.json`, a harness-only file. It names ground-truth premises, the
+signed facts that contradict the false claim, the subject facts that must agree across the evidence and
+the claim, and the expected grade. The harness resolves each named fact in the event's signed `ext` and
+requires exactly one occurrence, so a fact that appeared twice fails rather than matching whichever copy
+was reached first. `scenario.json` is not checker input and cannot raise or lower a grade.

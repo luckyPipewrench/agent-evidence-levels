@@ -1,0 +1,13 @@
+{
+  "events": {
+    "report-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    },
+    "tool-write-1": {
+      "status": "UNCLASSIFIED",
+      "class": "irreversible"
+    }
+  },
+  "coverage": "N/A"
+}

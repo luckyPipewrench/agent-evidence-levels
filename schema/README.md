@@ -12,6 +12,17 @@ validating fixtures. `docs/ARTIFACT-FORMAT.md` is the normative source; these sc
 The `anchors.json` and `counterparty.jsonl` payload shapes are specified in `docs/ARTIFACT-FORMAT.md`
 sections 6 and 7; schemas for them are a v0.2 addition.
 
+## `ext` sub-namespaces
+
+`ext` is opaque to the base rung, but it is not unowned. An opt-in extension may claim a sub-namespace
+and read it, so a producer must not invent a key that collides with one. Claimed so far:
+
+- `ext.gov` — read by the governability extension; `declared_reversibility` decides DECLARED versus
+  UNCLASSIFIED and therefore feeds the coverage invariant. See `docs/GOVERNABILITY-EXTENSION.md`.
+- `ext.fixture` — used only by the conformance corpus under `fixtures/limits/`, to carry the narrative
+  a limitation case demonstrates. AEL defines no meaning for it and nothing reads it. Do not copy it
+  into production artifacts.
+
 Note: these schemas describe structural shape. They do not and cannot express AEL's real guarantees
 (signature verification over exact bytes, canonical-form equality, hash-linked ordering, the
 minimum-over-sub-dimensions grade). Those live in the reference checker, which is the conformance

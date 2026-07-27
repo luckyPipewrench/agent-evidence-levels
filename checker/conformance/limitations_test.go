@@ -109,8 +109,12 @@ func assertSignedFact(t *testing.T, art *ael.Artifact, fact signedFact) int {
 			if err := json.Unmarshal(record.PayloadRaw, &payload); err != nil {
 				t.Fatal(err)
 			}
-			if !findValue(payload["ext"], fact.Fact, fact.Value) {
-				t.Fatalf("signed event %q does not contain %q=%v", fact.EventID, fact.Fact, fact.Value)
+			got := collectValues(payload["ext"], fact.Fact)
+			if len(got) != 1 {
+				t.Fatalf("signed event %q must carry %q exactly once in ext, found %d", fact.EventID, fact.Fact, len(got))
+			}
+			if !reflect.DeepEqual(got[0], fact.Value) {
+				t.Fatalf("signed event %q has %q=%v, scenario claims %v", fact.EventID, fact.Fact, got[0], fact.Value)
 			}
 			foundSeq = record.Payload.Seq
 		}
@@ -121,25 +125,28 @@ func assertSignedFact(t *testing.T, art *ael.Artifact, fact signedFact) int {
 	return foundSeq
 }
 
-func findValue(value any, key string, want any) bool {
+// collectValues returns every occurrence of key anywhere in the signed ext
+// object. A first-match search would return on whichever occurrence Go's
+// randomized map iteration reached first, so a scenario naming a fact that
+// appears twice would pass or fail by coin flip. Collecting every occurrence and
+// requiring exactly one at the call site makes a duplicate key a deterministic
+// failure, which is what lets scenario.json claim it names an exact signed fact.
+func collectValues(value any, key string) []any {
+	var out []any
 	switch value := value.(type) {
 	case map[string]any:
-		if got, ok := value[key]; ok && reflect.DeepEqual(got, want) {
-			return true
+		if got, ok := value[key]; ok {
+			out = append(out, got)
 		}
 		for _, child := range value {
-			if findValue(child, key, want) {
-				return true
-			}
+			out = append(out, collectValues(child, key)...)
 		}
 	case []any:
 		for _, child := range value {
-			if findValue(child, key, want) {
-				return true
-			}
+			out = append(out, collectValues(child, key)...)
 		}
 	}
-	return false
+	return out
 }
 
 func readLimitationScenario(t *testing.T, path string) limitationScenario {
@@ -166,6 +173,9 @@ func assertScenario(t *testing.T, wantCase string, scenario limitationScenario) 
 	if len(scenario.ContradictingEvidence) == 0 || len(scenario.RecordedClaim) == 0 {
 		t.Fatal("scenario must bind contradicting evidence and a recorded claim")
 	}
+	if len(scenario.BoundFacts) == 0 {
+		t.Fatal("scenario must bind at least one shared subject fact across evidence and claim")
+	}
 	assertBoundFacts(t, scenario)
 	for key, truth := range scenario.GroundTruth {
 		evidence, ok := factByName(scenario.ContradictingEvidence, key)
@@ -188,21 +198,24 @@ func assertScenario(t *testing.T, wantCase string, scenario limitationScenario) 
 	}
 }
 
+// assertBoundFacts checks that the claim and the evidence contradicting it are
+// about the same subject. Counting occurrences across the two lists pooled
+// together is not enough: two evidence events naming the same file satisfy a
+// count of two while leaving the claim bound to nothing, which is exactly how a
+// "born wrong" scenario stops demonstrating anything. Each bound fact must
+// therefore appear on both sides and agree everywhere it appears.
 func assertBoundFacts(t *testing.T, scenario limitationScenario) {
 	t.Helper()
-	all := append(append([]signedFact{}, scenario.ContradictingEvidence...), scenario.RecordedClaim...)
 	for _, name := range scenario.BoundFacts {
-		var values []any
-		for _, fact := range all {
-			if fact.Fact == name {
-				values = append(values, fact.Value)
-			}
+		evidence := factsByName(scenario.ContradictingEvidence, name)
+		claim := factsByName(scenario.RecordedClaim, name)
+		if len(evidence) == 0 || len(claim) == 0 {
+			t.Fatalf("bound fact %q must appear in both the contradicting evidence and the recorded claim (evidence=%d claim=%d)",
+				name, len(evidence), len(claim))
 		}
-		if len(values) < 2 {
-			t.Fatalf("bound fact %q must appear at least twice", name)
-		}
-		for _, value := range values[1:] {
-			if !reflect.DeepEqual(value, values[0]) {
+		values := append(evidence, claim...)
+		for _, fact := range values[1:] {
+			if !reflect.DeepEqual(fact.Value, values[0].Value) {
 				t.Fatalf("bound fact %q disagrees across signed events", name)
 			}
 		}
@@ -218,6 +231,16 @@ func assertEvidenceOrder(t *testing.T, scenario limitationScenario, seqs map[str
 			t.Fatalf("claim event %q must follow contradicting evidence %q", claim.EventID, evidence.EventID)
 		}
 	}
+}
+
+func factsByName(facts []signedFact, name string) []signedFact {
+	var out []signedFact
+	for _, fact := range facts {
+		if fact.Fact == name {
+			out = append(out, fact)
+		}
+	}
+	return out
 }
 
 func factByName(facts []signedFact, name string) (signedFact, bool) {

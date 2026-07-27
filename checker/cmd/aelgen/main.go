@@ -759,6 +759,7 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		fixtureActivity("2026-01-01T00:00:30Z", "report", "report-1", "out", map[string]any{
 			"kind": "agent_claim",
 			"claim": map[string]any{
+				"path":                    "/work/status.json",
 				"independently_confirmed": true,
 				"status":                  "healthy",
 			},
@@ -842,6 +843,16 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 				"expected_grade": 1,
 				"interpretation": "AEL verifies that the signed claim was recorded intact; it does not make the claim true.",
 			},
+			// Pins that the fixture narrative in ext.fixture carries no governability
+			// meaning. ext.gov is a graded sub-namespace; ext.fixture must never
+			// become one by accident.
+			govExpect: &govExpectation{
+				Events: map[string]govEventExpect{
+					"tool-write-1": {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"report-1":     {Status: "UNCLASSIFIED", Class: "irreversible"},
+				},
+				Coverage: "N/A",
+			},
 		},
 		{
 			name: "limits/self_referential_confirmation", records: selfConfirmation,
@@ -857,10 +868,19 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 				},
 				"recorded_claim": []any{
 					map[string]any{"event_id": "report-1", "fact": "independently_confirmed", "value": true},
+					map[string]any{"event_id": "report-1", "fact": "path", "value": "/work/status.json"},
 				},
 				"bound_facts":    []any{"path"},
 				"expected_grade": 1,
 				"interpretation": "Reading back an agent-authored status file is not independent confirmation, even when the read and claim are faithfully recorded.",
+			},
+			govExpect: &govExpectation{
+				Events: map[string]govEventExpect{
+					"status-write-1": {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"status-read-1":  {Status: "UNCLASSIFIED", Class: "irreversible"},
+					"report-1":       {Status: "UNCLASSIFIED", Class: "irreversible"},
+				},
+				Coverage: "N/A",
 			},
 		},
 		{name: "gov/policy_bound", records: govPolicyBound, policies: map[string][]byte{govPolicyHash: govPolicyRaw}, expect: expect(1, "+R", map[string]string{"R": "PASS"}), govExpect: &govExpectation{Events: map[string]govEventExpect{"evt-1": {Status: "POLICY-BOUND", Class: "irreversible"}}, Coverage: "N/A"}},

@@ -31,33 +31,43 @@ type govWant struct {
 // gov/irreversible_scoped_out proves an irreversible action scoped out of the
 // correspondence set is caught as a coverage gap.
 func TestGovernabilityCorpus(t *testing.T) {
-	root := filepath.Clean("../../fixtures/gov")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read gov fixtures dir: %v", err)
+	root := filepath.Clean("../../fixtures")
+	var caseDirs []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "expect_gov.json" {
+			return nil
+		}
+		caseDirs = append(caseDirs, filepath.Dir(path))
+		return nil
+	}); err != nil {
+		t.Fatalf("walk fixtures: %v", err)
 	}
 	found := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	for _, caseDir := range caseDirs {
+		rel, err := filepath.Rel(root, caseDir)
+		if err != nil {
+			t.Fatal(err)
 		}
-		caseDir := filepath.Join(root, e.Name())
+		name := filepath.ToSlash(rel)
 		raw, err := os.ReadFile(filepath.Join(caseDir, "expect_gov.json"))
 		if err != nil {
-			continue
+			t.Fatalf("%s: read expect_gov.json: %v", name, err)
 		}
 		found++
 		var want govWant
 		if err := json.Unmarshal(raw, &want); err != nil {
-			t.Fatalf("%s: parse expect_gov.json: %v", e.Name(), err)
+			t.Fatalf("%s: parse expect_gov.json: %v", name, err)
 		}
 		art, err := ael.LoadArtifact(caseDir, filepath.Join(caseDir, "keys"))
 		if err != nil {
-			t.Fatalf("%s: load artifact: %v", e.Name(), err)
+			t.Fatalf("%s: load artifact: %v", name, err)
 		}
 		runs := ael.Governability(art)
 		if len(runs) != 1 {
-			t.Fatalf("%s: expected 1 run, got %d", e.Name(), len(runs))
+			t.Fatalf("%s: expected 1 run, got %d", name, len(runs))
 		}
 		run := runs[0]
 
@@ -68,28 +78,28 @@ func TestGovernabilityCorpus(t *testing.T) {
 		for id, w := range want.Events {
 			ev, ok := got[id]
 			if !ok {
-				t.Fatalf("%s: event %s absent from governability output", e.Name(), id)
+				t.Fatalf("%s: event %s absent from governability output", name, id)
 			}
 			if string(ev.Status) != w.Status {
-				t.Fatalf("%s: event %s status = %s, want %s", e.Name(), id, ev.Status, w.Status)
+				t.Fatalf("%s: event %s status = %s, want %s", name, id, ev.Status, w.Status)
 			}
 			if ev.Class != w.Class {
-				t.Fatalf("%s: event %s class = %s, want %s", e.Name(), id, ev.Class, w.Class)
+				t.Fatalf("%s: event %s class = %s, want %s", name, id, ev.Class, w.Class)
 			}
 		}
 
 		if want.Coverage != "" {
 			if run.Coverage == nil {
-				t.Fatalf("%s: want coverage %s, got nil", e.Name(), want.Coverage)
+				t.Fatalf("%s: want coverage %s, got nil", name, want.Coverage)
 			}
 			if run.Coverage.Status != want.Coverage {
-				t.Fatalf("%s: coverage = %s, want %s", e.Name(), run.Coverage.Status, want.Coverage)
+				t.Fatalf("%s: coverage = %s, want %s", name, run.Coverage.Status, want.Coverage)
 			}
 			if !govEqualStrings(run.Coverage.Gaps, want.Gaps) {
-				t.Fatalf("%s: coverage gaps = %v, want %v", e.Name(), run.Coverage.Gaps, want.Gaps)
+				t.Fatalf("%s: coverage gaps = %v, want %v", name, run.Coverage.Gaps, want.Gaps)
 			}
 			if want.Anomalies != nil && !govEqualStrings(run.Coverage.Anomalies, want.Anomalies) {
-				t.Fatalf("%s: coverage anomalies = %v, want %v", e.Name(), run.Coverage.Anomalies, want.Anomalies)
+				t.Fatalf("%s: coverage anomalies = %v, want %v", name, run.Coverage.Anomalies, want.Anomalies)
 			}
 		}
 	}
