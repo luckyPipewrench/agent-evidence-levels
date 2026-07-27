@@ -1,0 +1,35 @@
+{
+  "bound_facts": [
+    "path"
+  ],
+  "case": "limits/born_wrong_tool_result",
+  "contradicting_evidence": [
+    {
+      "event_id": "tool-write-1",
+      "fact": "write_succeeded",
+      "value": false
+    },
+    {
+      "event_id": "tool-write-1",
+      "fact": "path",
+      "value": "/work/report.txt"
+    }
+  ],
+  "expected_grade": 1,
+  "ground_truth": {
+    "write_succeeded": false
+  },
+  "interpretation": "AEL verifies that the signed claim was recorded intact; it does not make the claim true.",
+  "recorded_claim": [
+    {
+      "event_id": "report-1",
+      "fact": "write_succeeded",
+      "value": true
+    },
+    {
+      "event_id": "report-1",
+      "fact": "path",
+      "value": "/work/report.txt"
+    }
+  ]
+}

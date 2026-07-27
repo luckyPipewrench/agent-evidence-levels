@@ -32,6 +32,9 @@ make check
 `make check` regenerates the fixture corpus, grades every fixture, and verifies
 that each result matches `expect.json`.
 
+The `fixtures/` tree is generator-owned. Add or change cases in
+`checker/cmd/aelgen`; `make gen` replaces the tree and discards hand edits.
+
 ## DCO and inbound licensing
 
 By contributing, you certify the Developer Certificate of Origin 1.1 and include

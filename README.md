@@ -8,8 +8,8 @@ trusting the vendor or the operator.
 - **`docs/ARTIFACT-FORMAT.md`** — the artifact format the checker consumes.
 - **`docs/CHECKER-DESIGN.md`** — the check matrix and fixture matrix.
 - **`checker/`** — the reference checker `aelcheck` and fixture generator `aelgen` (Apache-2.0).
-- **`fixtures/`** — the per-rung conformance corpus: one valid artifact per rung plus the perturbed
-  artifacts the checker must reject or flag (Apache-2.0).
+- **`fixtures/`** — the conformance corpus: valid per-rung artifacts, perturbed artifacts the checker
+  must reject or flag, and valid limitation cases it must accept without overstating (Apache-2.0).
 - **`GRADES.md`** — the self-grading registry; the editor's row is first and held to the same rule.
 - **`docs/VERSIONING.md`** — draft stability, compatibility, and donation posture.
 - **`docs/RATIONALE.md`** — non-normative positioning and adoption guidance, kept out of the spec.

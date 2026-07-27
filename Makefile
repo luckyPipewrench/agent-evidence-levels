@@ -22,7 +22,7 @@ test:
 # The proof: regenerate the corpus, grade every case, assert it matches expect.json
 # (rung corpus + governability extension corpus).
 check: gen
-	go test ./checker/conformance/... -run 'TestCorpus|TestGovernabilityCorpus' -v
+	go test ./checker/conformance/... -v
 	@echo
 	@echo "=== human-readable corpus grading ==="
 	go run ./checker/cmd/aelgen --report --out ./fixtures
