@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
@@ -45,6 +46,7 @@ func TestGovernabilityCorpus(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("walk fixtures: %v", err)
 	}
+	assertGovCorpusMatchesManifest(t, root, caseDirs)
 	found := 0
 	for _, caseDir := range caseDirs {
 		rel, err := filepath.Rel(root, caseDir)
@@ -105,6 +107,51 @@ func TestGovernabilityCorpus(t *testing.T) {
 	}
 	if found == 0 {
 		t.Fatal("no gov fixtures with expect_gov.json found")
+	}
+}
+
+// assertGovCorpusMatchesManifest pins the opt-in governability fixtures to the
+// generator's committed list. Without it, deleting expect_gov.json silently
+// removes that case's governability assertion while its ordinary corpus test
+// continues to pass.
+func assertGovCorpusMatchesManifest(t *testing.T, root string, caseDirs []string) {
+	t.Helper()
+	manifestPath := filepath.Join(root, "GOV-CASES.txt")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read governability case manifest: %v (run go run ./checker/cmd/aelgen --out ./fixtures)", err)
+	}
+	want := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			if want[name] {
+				t.Errorf("governability case manifest %s lists case %q more than once", manifestPath, name)
+				continue
+			}
+			want[name] = true
+		}
+	}
+	if len(want) == 0 {
+		t.Fatalf("governability case manifest %s is empty", manifestPath)
+	}
+
+	got := map[string]bool{}
+	for _, caseDir := range caseDirs {
+		rel, err := filepath.Rel(root, caseDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[filepath.ToSlash(rel)] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("case %q is listed in %s but has no expect_gov.json on disk", name, manifestPath)
+		}
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("governability fixture %q is on disk but missing from %s", name, manifestPath)
+		}
 	}
 }
 
