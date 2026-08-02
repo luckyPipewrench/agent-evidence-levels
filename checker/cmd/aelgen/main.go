@@ -124,6 +124,9 @@ func generate(outDir string, report bool) error {
 			return err
 		}
 	}
+	if err := writeCaseManifest(outDir, cases); err != nil {
+		return err
+	}
 	if report {
 		return reportCases(outDir, cases)
 	}
@@ -976,6 +979,19 @@ func expect(grade any, r string, must map[string]string) expected {
 
 func expectRuns(runs []runExpected) expected {
 	return expected{Runs: runs, Note: ""}
+}
+
+// writeCaseManifest records the exact set of cases the generator emitted. The
+// conformance suite asserts the on-disk corpus matches this list, so a case can
+// never leave the corpus without the removal showing up as a diff here.
+func writeCaseManifest(root string, cases []caseDef) error {
+	names := make([]string, 0, len(cases))
+	for _, c := range cases {
+		names = append(names, c.name)
+	}
+	sort.Strings(names)
+	body := strings.Join(names, "\n") + "\n"
+	return os.WriteFile(filepath.Join(root, "CASES.txt"), []byte(body), 0o644)
 }
 
 func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {

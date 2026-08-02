@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
@@ -36,6 +37,7 @@ func TestCorpus(t *testing.T) {
 	if len(entries) == 0 {
 		t.Fatalf("no fixtures found under %s; run go run ./checker/cmd/aelgen --out ./fixtures", root)
 	}
+	assertCorpusMatchesManifest(t, root, entries)
 	for _, entry := range entries {
 		entry := entry
 		t.Run(entry, func(t *testing.T) {
@@ -79,6 +81,43 @@ func TestCorpus(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// assertCorpusMatchesManifest pins the corpus to the generator's committed case
+// list. Without it a case that stops being generated grades the same as a case
+// that ran and passed: the walk finds fewer directories and the suite still
+// reports green. Both directions are checked, so a case missing from disk and a
+// case missing from the manifest each fail loudly.
+func assertCorpusMatchesManifest(t *testing.T, root string, entries []string) {
+	t.Helper()
+	manifestPath := filepath.Join(root, "CASES.txt")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read case manifest: %v (run go run ./checker/cmd/aelgen --out ./fixtures)", err)
+	}
+	want := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			want[name] = true
+		}
+	}
+	if len(want) == 0 {
+		t.Fatalf("case manifest %s is empty", manifestPath)
+	}
+	got := map[string]bool{}
+	for _, entry := range entries {
+		got[entry] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("case %q is listed in %s but has no fixture on disk", name, manifestPath)
+		}
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("fixture %q is on disk but missing from %s", name, manifestPath)
+		}
 	}
 }
 
