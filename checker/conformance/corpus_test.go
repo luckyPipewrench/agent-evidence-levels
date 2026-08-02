@@ -99,6 +99,10 @@ func assertCorpusMatchesManifest(t *testing.T, root string, entries []string) {
 	want := map[string]bool{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		if name := strings.TrimSpace(line); name != "" {
+			if want[name] {
+				t.Errorf("case manifest %s lists case %q more than once", manifestPath, name)
+				continue
+			}
 			want[name] = true
 		}
 	}

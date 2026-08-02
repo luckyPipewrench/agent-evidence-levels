@@ -986,12 +986,23 @@ func expectRuns(runs []runExpected) expected {
 // never leave the corpus without the removal showing up as a diff here.
 func writeCaseManifest(root string, cases []caseDef) error {
 	names := make([]string, 0, len(cases))
+	govNames := make([]string, 0)
 	for _, c := range cases {
 		names = append(names, c.name)
+		if c.govExpect != nil {
+			govNames = append(govNames, c.name)
+		}
 	}
+	if err := writeManifest(root, "CASES.txt", names); err != nil {
+		return err
+	}
+	return writeManifest(root, "GOV-CASES.txt", govNames)
+}
+
+func writeManifest(root, filename string, names []string) error {
 	sort.Strings(names)
 	body := strings.Join(names, "\n") + "\n"
-	return os.WriteFile(filepath.Join(root, "CASES.txt"), []byte(body), 0o644)
+	return os.WriteFile(filepath.Join(root, filename), []byte(body), 0o644)
 }
 
 func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
