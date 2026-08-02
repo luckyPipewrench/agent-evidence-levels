@@ -25,7 +25,7 @@ make fmt            # Format Go code with gofumpt when available, otherwise gofm
 make clean          # Remove bin/
 ```
 
-Go version: 1.25 (from the `go` directive in `go.mod`).
+Go version: use the `go` directive in `go.mod`.
 
 `make check` is the real proof for a change to the checker or corpus: it first regenerates the fixtures, then checks the conformance corpus against its expected results and prints human-readable grades. Run the validation required by `CONTRIBUTING.md` before proposing a change:
 
