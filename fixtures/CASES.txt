@@ -8,6 +8,7 @@ ael0/transpose
 ael0/unpublished_key
 ael0/valid
 ael1/ext_field_accepted
+ael1/heartbeat_deleted
 ael1/heartbeat_gap
 ael1/no_close
 ael1/nonmonotonic_ts

@@ -160,7 +160,17 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	ael1Valid, err := buildRecords(priv, "run-ael1-valid", "r1", fp, []recordPlan{
 		open("2026-01-01T00:00:00Z", 60, 5),
 		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		activity("2026-01-01T00:00:20Z", "net", "evt-2", "out", nil, nil),
 		heartbeat("2026-01-01T00:00:30Z"),
+		closePlan("2026-01-01T00:00:40Z", nil, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	ael1HeartbeatDeleted, err := buildRecords(priv, "run-ael1-heartbeat-deleted", "r1", fp, []recordPlan{
+		open("2026-01-01T00:00:00Z", 60, 5),
+		activity("2026-01-01T00:00:10Z", "net", "evt-1", "out", nil, nil),
+		activity("2026-01-01T00:00:20Z", "net", "evt-2", "out", nil, nil),
 		closePlan("2026-01-01T00:00:40Z", nil, ""),
 	})
 	if err != nil {
@@ -775,7 +785,7 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	}
 
 	return []caseDef{
-		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
+		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS", "h": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
 		{name: "ael0/transpose", records: transpose, expect: expect("ungraded", "pending", map[string]string{"d": "FAIL"})},
 		{name: "ael0/interior_del", records: interiorDel, expect: expect("ungraded", "pending", map[string]string{"e": "FAIL"})},
@@ -785,6 +795,7 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 		{name: "ael0/bad_key_length", records: ael0Valid, badKeyFiles: map[string][]byte{fp: []byte(base64.StdEncoding.EncodeToString([]byte("short")) + "\n")}, expect: expect("ungraded", "pending", map[string]string{"a": "UV"})},
 		{name: "ael0/tail_truncated_silent", records: ael0Valid[:2], expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS"})},
 		{name: "ael1/valid", records: ael1Valid, expect: expect(1, "pending", map[string]string{"f": "PASS", "g": "PASS", "h": "PASS", "i": "PASS"})},
+		{name: "ael1/heartbeat_deleted", records: ael1HeartbeatDeleted, expect: expect(0, "pending", map[string]string{"h": "FAIL"})},
 		{name: "ael1/seq_gap", records: seqGap, expect: expect(0, "pending", map[string]string{"g": "FAIL"})},
 		{name: "ael1/heartbeat_gap", records: heartbeatGap, expect: expect(0, "pending", map[string]string{"h": "FAIL"})},
 		{name: "ael1/nonmonotonic_ts", records: nonmonotonicTS, expect: expect(0, "pending", map[string]string{"h": "FAIL"})},

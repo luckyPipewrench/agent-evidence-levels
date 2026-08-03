@@ -22,8 +22,10 @@ Every check yields `PASS` | `FAIL` | `UV`.
 ### AEL-1 (gap/truncation-evident within a run)
 - **f `open`** — recorder has an `open` at seq 0 with `hmax>0` (else caps at AEL-0).
 - **g `contiguous`** — seq is 0..N contiguous, no gaps (gap → FAIL).
-- **h `heartbeat`** — timestamps are monotonic and spacing between consecutive records ≤
-  `hmax + htol` (backwards time or exceed → FAIL).
+- **h `heartbeat`** — when `hmax>0`, at least one signed `heartbeat` record is present, timestamps
+  are monotonic, and spacing between consecutive records ≤ `hmax + htol` (missing heartbeat,
+  backwards time, or exceed → FAIL). With `hmax=0`, heartbeats are unused and this check does not
+  require one; `f` caps the recorder at AEL-0.
 - **i `close_count`** — `close.count` equals records present; `close.head` matches record at count-2 (tail removed → FAIL).
 - **j `open_end`** — a run with no `close` classifies `OPEN/ABNORMAL-END` (first-class, not PASS/FAIL).
 
@@ -100,6 +102,7 @@ asserts each case matches its `expect.json`.
 | `ael0/bad_key_length` | — | a (UV) | malformed published key is treated as **UV**, not artifact FAIL |
 | `ael0/tail_truncated_silent` | AEL-0 | AEL-0 limitation | tail-truncated AEL-0 chain still grades 0 |
 | `ael1/valid` | AEL-1 | — | grade 1 |
+| `ael1/heartbeat_deleted` | — | h | heartbeat removed and run re-signed/rechained; check h FAIL |
 | `ael1/seq_gap` | — | g | check g FAIL |
 | `ael1/heartbeat_gap` | — | h | check h FAIL |
 | `ael1/nonmonotonic_ts` | — | h | check h FAIL |
