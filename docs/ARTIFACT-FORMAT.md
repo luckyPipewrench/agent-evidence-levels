@@ -87,7 +87,8 @@ Type-specific:
 - **`activity`** adds: `event` = `{"class":<string>,"id":<string>,"dir":"out"|"in"|"internal"}`,
   and OPTIONAL `decision` = `{"policy":<policy-hash>,"request_fp":<string>,
   "inputs":<object string→(int|string|bool)>,"verdict":"allow"|"block"|"defer"}` (present enables R).
-- **`heartbeat`** adds nothing; its presence within H is the liveness statement.
+- **`heartbeat`** adds nothing; its presence within H is the liveness statement. A run with
+  `hmax > 0` must contain a signed `heartbeat` record; activity records do not substitute for it.
 - **`close`** adds: `count` (int, total records in this `(run,recorder)` including `open` and
   `close`), `head` (string, hex SHA-256 of the `payload_bytes` of the record at `seq = count-2`, the
   record immediately before `close`).

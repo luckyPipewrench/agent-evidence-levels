@@ -216,33 +216,47 @@ func checkContiguous(art *Artifact) Outcome {
 
 func checkHeartbeat(art *Artifact) Outcome {
 	for _, log := range art.RecorderLogs {
-		if len(log.Records) == 0 {
-			return Outcome{Status: Fail, Message: fmt.Sprintf("%s has no records", log.ID)}
-		}
-		hmax := log.Records[0].Payload.HMax
-		htol := log.Records[0].Payload.HTol
-		if hmax <= 0 {
-			return Outcome{Status: Fail, Message: fmt.Sprintf("%s hmax=%d; heartbeats unused", log.ID, hmax)}
-		}
-		limit := time.Duration(hmax+htol) * time.Second
-		for i := 1; i < len(log.Records); i++ {
-			prevTS, err := log.Records[i-1].Payload.Time()
-			if err != nil {
-				return Outcome{Status: Fail, Message: recordMsg(log.Records[i-1], err)}
-			}
-			curTS, err := log.Records[i].Payload.Time()
-			if err != nil {
-				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
-			}
-			if curTS.Before(prevTS) {
-				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("non-monotonic timestamp %s before previous %s", curTS.Format(time.RFC3339), prevTS.Format(time.RFC3339)))}
-			}
-			if curTS.Sub(prevTS) > limit {
-				return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
-			}
+		if out := checkHeartbeatLog(log); out.Status != Pass {
+			return out
 		}
 	}
-	return Outcome{Status: Pass, Message: "record spacing is within hmax+htol"}
+	return Outcome{Status: Pass, Message: "signed heartbeats are present when enabled and record spacing is within hmax+htol"}
+}
+
+func checkHeartbeatLog(log *RecorderLog) Outcome {
+	if len(log.Records) == 0 {
+		return Outcome{Status: Fail, Message: fmt.Sprintf("%s has no records", log.ID)}
+	}
+	hmax := log.Records[0].Payload.HMax
+	htol := log.Records[0].Payload.HTol
+	if hmax <= 0 {
+		return Outcome{Status: Pass, Message: fmt.Sprintf("%s hmax=%d; heartbeats unused", log.ID, hmax)}
+	}
+	limit := time.Duration(hmax+htol) * time.Second
+	sawHeartbeat := false
+	for i := 1; i < len(log.Records); i++ {
+		if log.Records[i].Payload.Type == "heartbeat" {
+			sawHeartbeat = true
+		}
+		prevTS, err := log.Records[i-1].Payload.Time()
+		if err != nil {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i-1], err)}
+		}
+		curTS, err := log.Records[i].Payload.Time()
+		if err != nil {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
+		}
+		if curTS.Before(prevTS) {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("non-monotonic timestamp %s before previous %s", curTS.Format(time.RFC3339), prevTS.Format(time.RFC3339)))}
+		}
+		if curTS.Sub(prevTS) > limit {
+			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
+		}
+	}
+	if !sawHeartbeat {
+		return Outcome{Status: Fail, Message: recordMsg(log.Records[0], fmt.Errorf("hmax=%d requires at least one signed heartbeat record", hmax))}
+	}
+	return Outcome{Status: Pass, Message: "signed heartbeat records are present and record spacing is within hmax+htol"}
 }
 
 func checkCloseCount(art *Artifact) Outcome {
@@ -842,24 +856,8 @@ func recorderAEL1(log *RecorderLog) Outcome {
 			return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("prev=%s, want %s", rec.Payload.Prev, log.Records[i-1].Hash))}
 		}
 	}
-	hmax := log.Records[0].Payload.HMax
-	htol := log.Records[0].Payload.HTol
-	limit := time.Duration(hmax+htol) * time.Second
-	for i := 1; i < len(log.Records); i++ {
-		prevTS, err := log.Records[i-1].Payload.Time()
-		if err != nil {
-			return Outcome{Status: Fail, Message: recordMsg(log.Records[i-1], err)}
-		}
-		curTS, err := log.Records[i].Payload.Time()
-		if err != nil {
-			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], err)}
-		}
-		if curTS.Before(prevTS) {
-			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("non-monotonic timestamp %s before previous %s", curTS.Format(time.RFC3339), prevTS.Format(time.RFC3339)))}
-		}
-		if curTS.Sub(prevTS) > limit {
-			return Outcome{Status: Fail, Message: recordMsg(log.Records[i], fmt.Errorf("gap %s exceeds %s", curTS.Sub(prevTS), limit))}
-		}
+	if out := checkHeartbeatLog(log); out.Status != Pass {
+		return out
 	}
 	closeRec := log.Records[len(log.Records)-1]
 	if closeRec.Payload.Type != "close" || closeRec.Payload.Count != len(log.Records) {

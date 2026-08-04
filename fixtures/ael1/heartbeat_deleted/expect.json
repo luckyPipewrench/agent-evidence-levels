@@ -1,0 +1,13 @@
+{
+  "runs": [
+    {
+      "id": "run-ael1-heartbeat-deleted",
+      "grade": 0,
+      "r": "pending",
+      "must": {
+        "h": "FAIL"
+      }
+    }
+  ],
+  "note": ""
+}
