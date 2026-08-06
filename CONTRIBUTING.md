@@ -10,8 +10,10 @@ checker-verifiable.
   `SPEC.md`.
 - Do not claim a grade without the signed verification package required by
   `SPEC.md` section 5.2, produced by a verifier that is neither the producer nor
-  the operator. Producer declarations and first-party evaluation results say
-  `No grade` and remain `asserted capability`.
+  the operator. Capability declarations say `No grade` and are listed as
+  `asserted capability`. A producer-run or operator-run evaluation also says
+  `No grade`, but it is an authenticated evaluation result rather than a
+  capability declaration, and it is described as one.
 - Keep normative changes precise: every new falsifiable requirement needs a
   checker behavior and at least one fixture that proves rejection of a broken
   artifact.
