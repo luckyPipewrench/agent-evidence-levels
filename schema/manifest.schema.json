@@ -23,7 +23,7 @@
         }
       }
     },
-    "claimed_rung": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "claimed_rung": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Deprecated producer hint retained for v0.1 compatibility; ignored by the checker and never a grade" },
     "coverage": { "enum": ["declared-only", "partial", "mediated-only", "enforced-total"], "description": "operator declaration; not verified" },
     "custody": { "enum": ["same-process", "same-host", "same-operator", "independent"], "description": "operator declaration; only key separation is verified" },
     "retention": {

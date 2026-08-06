@@ -18,6 +18,9 @@ The Agent Evidence Level grades a record of AI-agent activity, from AEL-0 to AEL
 | Artifact | The bundle a verifier receives: records, key references, proofs, declarations. |
 | Checker | A runnable program, independent of the producer, that evaluates an artifact against this standard. |
 | Verifier | Whoever runs the checker. Assumed to distrust vendor and operator alike. |
+| Conformance claim | A public statement that a particular run earned an AEL grade. It is valid only when bound to an independently produced verification record. |
+| Capability declaration | A producer's machine-readable statement about the artifact formats and export operations its product supports. It is not a grade. |
+| Verification record | An authenticated statement from a verifier that binds the checker result and negative-control transcript to one exact run artifact and its verification inputs. |
 
 ## 2. Grade semantics
 
@@ -27,6 +30,11 @@ The Agent Evidence Level grades a record of AI-agent activity, from AEL-0 to AEL
 4. **No portable verification, no grade.** A mechanism whose records only its own producer can check is Ungraded, whatever its cryptography.
 5. **Reporting format.** A published grade MUST be per run and carry its annotations: `run <id>: AEL-n [+R | R-pending] (coverage: ...; custody: ...; anchor: ...; retention: ...)`. A bare "AEL-3" is a nonconforming claim, and a single headline number for a multi-run artifact is nonconforming.
 6. **R suffix.** Decision-reproducibility (section 3.6) is orthogonal to the rungs and is reported as `+R` or `R-pending` at every rung.
+7. **A producer does not award a grade.** Live process state, configuration, feature flags, a producer-run checker, and a producer's manifest declaration MAY be reported as operational or capability facts. They MUST NOT be labeled `AEL-n`, `AEL level`, `AEL grade`, `AEL verified`, or any equivalent numeric AEL claim. Adding `self-assessed`, `self-asserted`, `capable of`, `target`, or another qualifier does not make a producer-chosen rung conforming.
+8. **Lifecycle and verification are separate.** A run is `OPEN`, `CLOSED`, or `ABNORMAL-END` based on signed run records and checker findings. Verification is absent or is established by a verification record trusted by the relying party. `CLOSED-PENDING-VERIFICATION` and `VERIFIED` MAY be displayed as derived combinations, but MUST NOT be producer-set run fields. An open artifact can earn at most AEL-0 after independent checking; an in-memory view of an open run has no grade.
+9. **A grade is bound, not portable.** A verification record applies only to the exact run, artifact bytes, out-of-band verification inputs, specification version, and checker version it names. It MUST NOT be promoted into a product-wide grade, a current-running grade, a fleet-wide grade, or a grade for another run.
+10. **Historical results and current acceptability are separate.** A verification record is an immutable statement about an evaluation that occurred. Time alone does not change what the exact artifact demonstrated. A relying policy MAY stop accepting the result because of an expiry, compromised key, withdrawn checker version, specification change, verifier revocation, or other named reason. If current status cannot be obtained from the declared status authority, the result is `STATUS-UNKNOWN`, not current and not revoked.
+11. **Independence is a trust decision.** A signature proves control of a verifier key, not organizational independence. A published result MUST identify the verifier and disclose its relationship to the producer and operator. The relying party or registry decides whether that relationship satisfies its independence policy.
 
 ## 3. The rungs
 
@@ -125,7 +133,42 @@ A single flat grade decomposes into these dimensions. Each rung sets required mi
 
 ## 5. Conformance: earned, not asserted
 
-A grade is earned when the reference checker, run by someone other than the producer, completes the rung's demonstrations against a real artifact, including every perturbation duty: for each property there exists a fixture in which one change (a flipped byte, a removed record, a swapped confirmation) breaks the property, and the checker must reject it. A checker that accepts a perturbed fixture is nonconforming, whatever its vendor says; a vendor statement, however detailed, earns nothing. AEL v0.1 therefore ships as three deliverables in one release: this specification, the reference checker, and a per-rung fixture corpus holding at least one valid artifact plus the required failing perturbations. A standard whose bar is "earned, not asserted" that ships without a runnable checker is the same attestation it criticizes; the checker and fixtures are part of v0.1, not a follow-up.
+A grade is earned when the reference checker, run by someone other than the producer, completes the rung's demonstrations against a real artifact. Two kinds of negative control are required:
+
+1. The checker version used for the evaluation MUST pass the published conformance corpus, including every required failing fixture.
+2. The verifier MUST derive a perturbed copy from the submitted artifact for each protection class needed by the reported rung and record that the checker rejects it for the expected reason. At AEL-0 this includes modification and chain-order or interior-deletion rejection. Each higher rung adds its own applicable gap, heartbeat, close, cross-recorder, anchor, or counterparty perturbation. A perturbation that cannot be constructed or checked is UV for that property, not PASS.
+
+A checker that accepts a required perturbation is nonconforming, whatever its vendor says. A vendor statement, however detailed, earns nothing. AEL v0.1 therefore ships as three deliverables in one release: this specification, the reference checker, and a per-rung fixture corpus holding at least one valid artifact plus the required failing perturbations. A standard whose bar is "earned, not asserted" that ships without a runnable checker is the same attestation it criticizes; the checker and fixtures are part of v0.1, not a follow-up.
+
+### 5.1 Capability declarations
+
+An AEL artifact capability declaration MAY identify:
+
+- its own schema and version;
+- the producer, product build, and configuration profile to which it applies;
+- AEL artifact format versions the product can export;
+- supported run-open, run-close, crash-preservation, export, and verification-result import operations;
+- known limits, including concurrency and custody limits; and
+- issue and update times.
+
+The declaration MUST NOT contain a current, maximum, target, supported, or self-assessed AEL rung. It MUST NOT contain a producer-set `verified` state. Format version `1` means artifact format version 1; it does not mean AEL-1. A producer MAY sign this declaration to authenticate its origin, but that signature does not turn any field into independently verified evidence.
+
+### 5.2 Publishing a verified result
+
+A conforming published grade MUST be backed by a verification record that contains or unambiguously references:
+
+- the run identifier and a cryptographic digest of the complete artifact presented;
+- a digest of the out-of-band keys and other verification inputs;
+- the AEL specification version and checker name, version, and executable digest;
+- the full per-run grade line, annotations, and PASS / FAIL / UV outcomes;
+- the artifact-derived perturbations attempted, their expected rejection reasons, and their observed outcomes;
+- the verifier's identity, verification key or registry identity, and declared relationship to producer and operator;
+- the evaluation time and any relying-policy expiry; and
+- the status authority and stable identifier used for supersession or revocation.
+
+The verifier MUST authenticate the record either with a digital signature under a separately trusted verifier key or through an immutable registry entry controlled by the verifier. Copying a verifier's text into a producer-controlled field is not authentication. A consumer displays `VERIFIED` only after it validates this authentication, matches every binding to the artifact and run being shown, and accepts the verifier under its own policy. Otherwise the honest state is pending, untrusted, invalid, revoked, expired, or status unknown, as applicable.
+
+Revocation and supersession do not edit the historical record. They are separate authenticated statements that name the original record identifier, state the reason and effective time, and identify any replacement. A producer cannot restore a revoked result by replaying an older copy. Offline consumers that cannot consult or validate the declared status source MUST report status unknown when current status is required by their policy.
 
 ## 6. Limits: what no rung can prove
 
@@ -152,9 +195,9 @@ Mechanisms, never vendors. Grades assume the mechanism as commonly shipped; a sp
 | Externally-anchored chains (heads in a transparency log; single recorder; no heartbeats or signed close) | AEL-0 (anchor: independent) | Anchoring freezes what was recorded and says nothing about what was not, so it earns the anchoring sub-dimension but not completeness. Rungs 1 and 2 are missing, so rung 3 is not earned. |
 | Independently-confirmed delivery (counterparty receipts, with no graded record behind them) | Ungraded to AEL-0 overall; rung-4 property on confirmed flows only | Confirms that specific deliveries happened. With no graded record to reconcile against, it cannot support run-level claims. |
 
-### 7.1 Self-grading registry
+### 7.1 Evidence registry
 
-Concrete deployments, including the editor's own, are graded in `GRADES.md` under the same rule as every other row: a grade with no linked artifact and checker transcript is marked "asserted." The editor's row is the first entry and is stated at its most defensible floor. See `GRADES.md`.
+Concrete runs, including the editor's own, may be listed in `GRADES.md` under the same rule as every other row. A numeric grade appears only with a linked artifact and independently authenticated verification record satisfying section 5.2. A producer declaration with no such record is listed as a capability declaration with **no grade**. See `GRADES.md`.
 
 ## 8. Name, definition, and governance
 
@@ -166,7 +209,7 @@ Concrete deployments, including the editor's own, are graded in `GRADES.md` unde
 
 **Home.** The specification lives in a standalone, vendor-neutral repository: spec under CC BY 4.0, reference checker and fixtures under Apache-2.0, no product marks in the specification. Product sites point at the repository; the repository points at no product.
 
-**GRADES.md.** The repository carries a self-grading registry. Any mechanism owner may open a pull request adding a row; a row must link an artifact and a checker transcript; rows without runnable evidence carry the label "asserted." The editor's row is held to the same rule as everyone else's.
+**GRADES.md.** The repository carries an evidence registry. Any mechanism owner may open a pull request adding a row. Numeric grades require an immutable artifact and an independently authenticated verification record. Capability declarations may be listed, but carry no grade. The editor's row is held to the same rule as everyone else's.
 
 **Endgame.** Once the vocabulary has usage independent of its editor, editorship is donated to a neutral foundation of the OpenSSF or OWASP class, with the reference checker maintained through the transition.
 

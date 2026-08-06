@@ -142,8 +142,10 @@ Pure declarations:
 - `correspondence.classes` and `counterparty.flows` declare the audited scope. Empty scope is UV,
   because no omission or confirmation claim can be checked, but a non-empty scope still does not
   prove that the declared scope is complete.
-- `claimed_rung` is an operator declaration. The checker computes and reports the earned rung
-  independently; `claimed_rung` is never used to raise or lower the grade.
+- `claimed_rung` is a deprecated producer hint retained for v0.1 artifact compatibility and fixture
+  coverage. The checker ignores it completely. It is not a capability declaration, conformance
+  claim, grade, target, or verification state, and consumers MUST NOT display it as one. A future
+  incompatible artifact-format version may remove it.
 
 The custody facts the checker proves are limited to verified key separation: AEL-2 recorders sign
 under **different** verified recorder keys, AEL-3 `anchor.log_key` differs from verified recorder
@@ -225,3 +227,7 @@ artifact emits one grade line. A multi-run artifact emits one grade line per run
 or single headline grade may hide a degraded run. For each rung above each run's grade, the checker
 prints the dimension that capped it and whether it was FAIL or UV. Machine-readable output is
 `{"runs":[...]}`, with one result object per run.
+
+This output is a checker result, not by itself a verification record under `SPEC.md` section 5.2. A
+conforming published grade also binds the exact artifact, out-of-band inputs, checker executable,
+artifact-derived perturbation transcript, verifier identity and relationship, and result status.

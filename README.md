@@ -10,7 +10,7 @@ trusting the vendor or the operator.
 - **`checker/`** — the reference checker `aelcheck` and fixture generator `aelgen` (Apache-2.0).
 - **`fixtures/`** — the conformance corpus: valid per-rung artifacts, perturbed artifacts the checker
   must reject or flag, and valid limitation cases it must accept without overstating (Apache-2.0).
-- **`GRADES.md`** — the self-grading registry; the editor's row is first and held to the same rule.
+- **`GRADES.md`** — the evidence registry; the editor's declaration is first and held to the same rule.
 - **`docs/VERSIONING.md`** — draft stability, compatibility, and donation posture.
 - **`docs/RATIONALE.md`** — non-normative positioning and adoption guidance, kept out of the spec.
 - **`docs/PRIOR-ART.md`** — how AEL relates to existing standards (transparency logs, audit-log and retention standards, evidence-handling), and what it deliberately does not restate.
@@ -22,7 +22,8 @@ trusting the vendor or the operator.
 
 The standard's bar is "earned, not asserted": a grade counts only when a reference checker,
 run by someone other than the producer, demonstrates it against a real artifact, including rejecting
-a perturbed copy. A standard with that bar that shipped without a runnable checker would be the same
+a perturbed copy. Live health and artifact capability may be self-reported, but neither carries an
+AEL number. A standard with that bar that shipped without a runnable checker would be the same
 attestation it criticizes. So the checker and the fixture corpus are part of v0.1, not a follow-up.
 
 ## Run it
@@ -34,8 +35,9 @@ make test      # go test ./...
 make check     # regenerate + grade the whole corpus; assert every case matches its expect.json
 ```
 
-`make check` printing, for each rung, the valid artifact graded at that rung and every perturbation
-rejected or flagged, is the proof the standard is earned.
+`make check` printing, for each rung, the valid fixture graded at that rung and every fixture
+perturbation rejected or flagged, demonstrates that the checker passes the conformance corpus. A
+real run still needs the separate verification record defined in `SPEC.md` section 5.2.
 
 ```
 aelcheck --keys <keysdir> <artifact>

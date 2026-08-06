@@ -144,7 +144,9 @@ asserts each case matches its `expect.json`.
 | `limits/self_referential_confirmation` | AEL-1 | provenance limitation | reading an agent-authored status file back as “independent” confirmation still grades AEL-1; signature and order do not create source independence |
 
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
-expected is the proof the standard is earned, not asserted.
+expected demonstrates that the checker passes the published conformance corpus. It does not award a
+grade to a producer's real run; that requires the independent verification record in `SPEC.md`
+section 5.2.
 
 Limitation cases also carry `scenario.json`, a harness-only file. It names ground-truth premises, the
 signed facts that contradict the false claim, the subject facts that must agree across the evidence and
