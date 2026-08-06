@@ -28,9 +28,8 @@ func evaluateRun(art *Artifact) Result {
 	checks["a"] = checkSignatures(art)
 	checks["b"] = checkCanonicalPayloads(art)
 	checks["c"] = checkByteflipDuty(checks["a"])
-	chain := checkChain(art)
-	checks["d"] = chain
-	checks["e"] = chain
+	checks["d"] = checkSequenceOrder(art)
+	checks["e"] = checkPredecessorLinks(art)
 	checks["w"] = checkClosedSchemas(art)
 	checks["f"] = checkOpen(art)
 	checks["g"] = checkContiguous(art)
@@ -141,14 +140,32 @@ func checkClosedSchemas(art *Artifact) Outcome {
 	return Outcome{Status: Pass, Message: "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"}
 }
 
+// checkByteflipDuty reports whether THIS run demonstrated that the checker
+// rejects byte-level modification. A passing signature over an unmodified
+// artifact demonstrates nothing of the kind: no byte was flipped, so the
+// rejecting branch never executed. Reporting Pass there claimed a negative
+// control that had not been run.
+//
+// A failing signature is the demonstration, and it only arises from an artifact
+// that actually carries the modification, which is what the conformance corpus
+// supplies. On an ordinary artifact evaluation the property is unverified, per
+// SPEC.md section 5: a perturbation that was not constructed is UV, not PASS.
+// Proof that the checker holds this property belongs to the published corpus,
+// not to a run over someone's unmutated artifact.
 func checkByteflipDuty(sig Outcome) Outcome {
 	if sig.Status == Pass {
-		return Outcome{Status: Pass, Message: "signature check rejects byte-level changes"}
+		return Outcome{
+			Status:  UV,
+			Message: "no byte-level modification was constructed for this artifact; corpus fixtures demonstrate rejection",
+		}
 	}
 	return sig
 }
 
-func checkChain(art *Artifact) Outcome {
+func checkSequenceOrder(art *Artifact) Outcome {
+	if len(art.RecorderLogs) == 0 {
+		return Outcome{Status: UV, Message: "no recorder logs are available for sequence-order verification"}
+	}
 	for _, log := range art.RecorderLogs {
 		if len(log.Records) == 0 {
 			return Outcome{Status: Fail, Message: fmt.Sprintf("%s has no records", log.ID)}
@@ -170,6 +187,30 @@ func checkChain(art *Artifact) Outcome {
 				if rec.Payload.Seq != 0 {
 					return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("first seq=%d, want 0", rec.Payload.Seq))}
 				}
+				continue
+			}
+			prev := log.Records[i-1]
+			if rec.Payload.Seq <= prev.Payload.Seq {
+				return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("seq=%d does not advance from previous seq=%d", rec.Payload.Seq, prev.Payload.Seq))}
+			}
+		}
+	}
+	return Outcome{Status: Pass, Message: "record sequence order strictly increases from seq 0"}
+}
+
+func checkPredecessorLinks(art *Artifact) Outcome {
+	if len(art.RecorderLogs) == 0 {
+		return Outcome{Status: UV, Message: "no recorder logs are available for predecessor-link verification"}
+	}
+	for _, log := range art.RecorderLogs {
+		if len(log.Records) == 0 {
+			return Outcome{Status: Fail, Message: fmt.Sprintf("%s has no records", log.ID)}
+		}
+		for i, rec := range log.Records {
+			if rec.ParseErr != nil || rec.LineErr != nil {
+				return Outcome{Status: Fail, Message: recordMsg(rec, firstErr(rec.LineErr, rec.ParseErr))}
+			}
+			if i == 0 {
 				if rec.Payload.Prev != zeroPrev {
 					return Outcome{Status: Fail, Message: recordMsg(rec, fmt.Errorf("first prev is not zero hash"))}
 				}
@@ -181,7 +222,7 @@ func checkChain(art *Artifact) Outcome {
 			}
 		}
 	}
-	return Outcome{Status: Pass, Message: "presented record order is hash-linked"}
+	return Outcome{Status: Pass, Message: "each record links to the preceding presented record"}
 }
 
 func checkOpen(art *Artifact) Outcome {

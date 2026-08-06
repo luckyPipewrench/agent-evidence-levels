@@ -3,7 +3,8 @@
 # Versioning and Stability
 
 AEL v0.1 is a draft for publication. It is suitable for review, experiments,
-and self-grading, but it is not yet a stable foundation-governed standard.
+and independent evaluation, but it is not yet a stable foundation-governed
+standard.
 
 ## Stability levels
 
@@ -28,6 +29,13 @@ and self-grading, but it is not yet a stable foundation-governed standard.
   not be silently redefined.
 - A rung claim must not become broader without a matching checker duty and
   fixture.
+- A producer declaration must not gain an AEL number through an editorial
+  clarification. Allowing self-awarded grades would change the meaning of every
+  rung and requires a new major specification version.
+- A verification record remains bound to the specification version and digest,
+  checker source revision, executable digest, and corpus identity it names. A
+  later specification may supersede that result under a relying policy, but must
+  not silently rewrite the historical evaluation.
 
 ## Donation target
 
@@ -35,3 +43,10 @@ The current editor may publish v0.x under this repository. The intended
 governance end state is donation of editorship to a neutral foundation once the
 vocabulary has independent use and critique, and the reference checker has
 external users.
+
+Donation MUST transfer the specification, conformance corpus, registry history,
+and revocation or supersession records together. The successor's registry policy
+must publish verifier eligibility and conflict-of-interest rules, preserve review
+history, and apply the same evidence requirements to founding-editor submissions
+as to every other producer. A change of repository owner or editor does not
+authenticate old producer claims or turn them into grades.
