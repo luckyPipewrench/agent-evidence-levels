@@ -141,9 +141,24 @@ func checkClosedSchemas(art *Artifact) Outcome {
 	return Outcome{Status: Pass, Message: "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"}
 }
 
+// checkByteflipDuty reports whether THIS run demonstrated that the checker
+// rejects byte-level modification. A passing signature over an unmodified
+// artifact demonstrates nothing of the kind: no byte was flipped, so the
+// rejecting branch never executed. Reporting Pass there claimed a negative
+// control that had not been run.
+//
+// A failing signature is the demonstration, and it only arises from an artifact
+// that actually carries the modification, which is what the conformance corpus
+// supplies. On an ordinary artifact evaluation the property is unverified, per
+// SPEC.md section 5: a perturbation that was not constructed is UV, not PASS.
+// Proof that the checker holds this property belongs to the published corpus,
+// not to a run over someone's unmutated artifact.
 func checkByteflipDuty(sig Outcome) Outcome {
 	if sig.Status == Pass {
-		return Outcome{Status: Pass, Message: "signature check rejects byte-level changes"}
+		return Outcome{
+			Status:  UV,
+			Message: "no byte-level modification was constructed for this artifact; corpus fixtures demonstrate rejection",
+		}
 	}
 	return sig
 }
