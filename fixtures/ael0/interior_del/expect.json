@@ -5,6 +5,7 @@
       "grade": "ungraded",
       "r": "pending",
       "must": {
+        "d": "PASS",
         "e": "FAIL"
       }
     }

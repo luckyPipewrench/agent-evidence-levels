@@ -13,8 +13,10 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **a `sig`** — every record signature verifies offline from artifact + `<keysdir>` only. Missing key → UV.
 - **b `canon`** — each `payload_bytes` is canonical (re-serialize equals stored) and has no duplicate keys.
 - **c `byteflip`** — a record with any payload byte changed must fail `a` (verifier rejects).
-- **d `transpose`** — two records swapped must break the `prev`/`seq` chain (reject).
-- **e `interior_del`** — an interior record removed must break `prev`/`seq` (reject).
+- **d `order`:** each recorder's presented sequence starts at zero and strictly increases. Gaps
+  remain visible but do not fail AEL-0; transposition or duplication fails this check.
+- **e `predecessor`:** each record links to the preceding presented record's payload hash, with the
+  zero hash at the start. Interior deletion breaks the first surviving successor's link.
 - **w `schema`** — verified closed-schema objects require the fields defined for their type and
   reject unknown top-level keys, except for the reserved opaque `ext` object. This covers record
   payloads, counterparty payloads, anchor entries, and `tree_head`.
@@ -63,7 +65,7 @@ FAILs caps the grade below and reports FAIL; one that is UV caps below and repor
 
 | Rung | Required (all must PASS) |
 |---|---|
-| AEL-0 | a, b, w, and chain-consistency for present records (c/d/e are the adversarial fixtures proving a/chain reject) |
+| AEL-0 | a, b, d, e, w |
 | AEL-1 | AEL-0 + f, g, h, i (j governs the no-close outcome) |
 | AEL-2 | AEL-1 on each recorder + k, l, m |
 | AEL-3 | AEL-2 + n, o, p, q, u |
@@ -94,8 +96,8 @@ asserts each case matches its `expect.json`.
 |---|---|---|---|
 | `ael0/valid` | AEL-0 | — | grade 0, r pending |
 | `ael0/byteflip` | — | c | check a FAIL |
-| `ael0/transpose` | — | d | chain FAIL |
-| `ael0/interior_del` | — | e | chain FAIL |
+| `ael0/transpose` | (none) | d/e | sequence-order and predecessor-link checks FAIL |
+| `ael0/interior_del` | (none) | e | predecessor-link check FAIL; sequence-order check PASS |
 | `ael0/noncanonical` | — | b | check b FAIL |
 | `ael0/dupkey` | — | b | check b FAIL |
 | `ael0/unpublished_key` | — | a (UV) | check a **UV** (grade ungraded, distinct from FAIL) |
