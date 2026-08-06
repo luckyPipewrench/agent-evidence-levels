@@ -787,8 +787,8 @@ func buildCases(priv ed25519.PrivateKey, fp string) ([]caseDef, error) {
 	return []caseDef{
 		{name: "ael0/valid", records: ael0Valid, expect: expect(0, "pending", map[string]string{"a": "PASS", "b": "PASS", "d": "PASS", "e": "PASS", "h": "PASS"})},
 		{name: "ael0/byteflip", records: byteflip, expect: expect("ungraded", "pending", map[string]string{"a": "FAIL"})},
-		{name: "ael0/transpose", records: transpose, expect: expect("ungraded", "pending", map[string]string{"d": "FAIL"})},
-		{name: "ael0/interior_del", records: interiorDel, expect: expect("ungraded", "pending", map[string]string{"e": "FAIL"})},
+		{name: "ael0/transpose", records: transpose, expect: expect("ungraded", "pending", map[string]string{"d": "FAIL", "e": "FAIL"})},
+		{name: "ael0/interior_del", records: interiorDel, expect: expect("ungraded", "pending", map[string]string{"d": "PASS", "e": "FAIL"})},
 		{name: "ael0/noncanonical", records: noncanonical, expect: expect("ungraded", "pending", map[string]string{"b": "FAIL"})},
 		{name: "ael0/dupkey", records: dupKey, expect: expect("ungraded", "pending", map[string]string{"b": "FAIL"})},
 		{name: "ael0/unpublished_key", records: ael0Valid, publishKeys: false, expect: expect("ungraded", "pending", map[string]string{"a": "UV"})},
