@@ -15,9 +15,17 @@ func TestConformanceExit(t *testing.T) {
 		want   int
 	}{
 		{
+			// Nothing evaluated means nothing earned. The earlier version of
+			// this case asserted 0 under the same name, which stated the right
+			// principle and encoded the opposite of it.
 			name:   "no runs earns nothing",
 			report: ael.Report{},
-			want:   0,
+			want:   exitNonconforming,
+		},
+		{
+			name:   "explicitly empty run slice",
+			report: ael.Report{Runs: []ael.Result{}},
+			want:   exitNonconforming,
 		},
 		{
 			name:   "graded run",

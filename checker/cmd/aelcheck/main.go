@@ -93,7 +93,20 @@ const exitNonconforming = 3
 // honest answer in both cases: nothing was earned. UV on a check that no rung
 // requires does not affect this, because the grade computation already decided
 // whether the missing evidence mattered.
+//
+// A report with no runs is nonconforming rather than clean. Nothing was
+// evaluated, so nothing was earned, and returning 0 there would contradict the
+// contract above. This is defensive today: artifactRuns appends an empty run ID
+// when it finds none, so Evaluate always yields at least one run and a caller
+// cannot currently reach this branch through the CLI. It is guarded anyway
+// because the alternative is a silent fail-open the moment that fallback
+// changes or another caller reaches this function directly, and a function
+// whose entire job is to report nonconformance should not have a path that
+// answers "clean" by default.
 func conformanceExit(report ael.Report) int {
+	if len(report.Runs) == 0 {
+		return exitNonconforming
+	}
 	for _, res := range report.Runs {
 		if res.Ungraded {
 			return exitNonconforming
