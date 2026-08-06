@@ -20,11 +20,12 @@ trusting the vendor or the operator.
 
 ## Why a checker ships with the spec
 
-The standard's bar is "earned, not asserted": a grade counts only when a reference checker,
-run by someone other than the producer, demonstrates it against a real artifact, including rejecting
-a perturbed copy. Live health and artifact capability may be self-reported, but neither carries an
-AEL number. A standard with that bar that shipped without a runnable checker would be the same
-attestation it criticizes. So the checker and the fixture corpus are part of v0.1, not a follow-up.
+The standard's bar is "earned, not asserted": a public grade counts only when a verifier that is
+neither the producer nor the operator checks a real artifact with a checker that passes the published
+conformance corpus, then publishes the signed verification package required by `SPEC.md` section 5.2.
+Live health and artifact capability may be self-reported, but neither carries an AEL number. A standard
+with that bar that shipped without a runnable checker would be the same attestation it criticizes. So
+the checker and the fixture corpus are part of v0.1, not a follow-up.
 
 ## Run it
 
@@ -37,7 +38,7 @@ make check     # regenerate + grade the whole corpus; assert every case matches 
 
 `make check` printing, for each rung, the valid fixture graded at that rung and every fixture
 perturbation rejected or flagged, demonstrates that the checker passes the conformance corpus. A
-real run still needs the separate verification record defined in `SPEC.md` section 5.2.
+real run still needs the signed verification package defined in `SPEC.md` section 5.2.
 
 ```
 aelcheck --keys <keysdir> <artifact>

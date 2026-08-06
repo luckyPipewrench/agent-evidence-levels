@@ -229,5 +229,7 @@ prints the dimension that capped it and whether it was FAIL or UV. Machine-reada
 `{"runs":[...]}`, with one result object per run.
 
 This output is a checker result, not by itself a verification record under `SPEC.md` section 5.2. A
-conforming published grade also binds the exact artifact, out-of-band inputs, checker executable,
-artifact-derived perturbation transcript, verifier identity and relationship, and result status.
+conforming published grade requires a signed package that carries the exact artifact, out-of-band
+inputs, artifact-evaluation result, and conformance-corpus result as content-addressed blobs and binds
+them to the checker executable and source revision, verifier identity and relationships, and result
+status.

@@ -145,8 +145,8 @@ asserts each case matches its `expect.json`.
 
 Every falsifiable claim in `SPEC.md` has a row here. `make check` printing all rows PASS/FAIL/UV as
 expected demonstrates that the checker passes the published conformance corpus. It does not award a
-grade to a producer's real run; that requires the independent verification record in `SPEC.md`
-section 5.2.
+grade to a producer's real run; that requires the signed verification package in `SPEC.md` section 5.2,
+produced by a verifier that is neither the producer nor the operator.
 
 Limitation cases also carry `scenario.json`, a harness-only file. It names ground-truth premises, the
 signed facts that contradict the false claim, the subject facts that must agree across the evidence and

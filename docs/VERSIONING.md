@@ -32,9 +32,10 @@ standard.
 - A producer declaration must not gain an AEL number through an editorial
   clarification. Allowing self-awarded grades would change the meaning of every
   rung and requires a new major specification version.
-- A verification record remains bound to the specification and checker versions
-  it names. A later specification may supersede that result under a relying
-  policy, but must not silently rewrite the historical evaluation.
+- A verification record remains bound to the specification version and digest,
+  checker source revision, executable digest, and corpus identity it names. A
+  later specification may supersede that result under a relying policy, but must
+  not silently rewrite the historical evaluation.
 
 ## Donation target
 

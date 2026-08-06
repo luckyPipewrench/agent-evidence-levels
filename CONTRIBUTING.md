@@ -8,9 +8,10 @@ checker-verifiable.
 
 - Do not add product-specific claims, marketing language, or vendor marks to
   `SPEC.md`.
-- Do not claim a grade without an immutable artifact and an independently
-  authenticated verification record satisfying `SPEC.md` section 5.2. Producer
-  declarations without that record say `No grade` and remain `asserted capability`.
+- Do not claim a grade without the signed verification package required by
+  `SPEC.md` section 5.2, produced by a verifier that is neither the producer nor
+  the operator. Producer declarations and first-party evaluation results say
+  `No grade` and remain `asserted capability`.
 - Keep normative changes precise: every new falsifiable requirement needs a
   checker behavior and at least one fixture that proves rejection of a broken
   artifact.
