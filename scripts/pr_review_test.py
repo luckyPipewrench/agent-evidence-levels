@@ -41,8 +41,8 @@ class RoutingTests(unittest.TestCase):
         self.assertNotIn("temperature", normal)
         self.assertEqual(normal["reasoning_effort"], "low")
         self.assertEqual(normal["max_completion_tokens"], 8192)
-        self.assertEqual(deep["reasoning_effort"], "medium")
-        self.assertEqual(deep["max_completion_tokens"], 25000)
+        self.assertEqual(deep["reasoning_effort"], "xhigh")
+        self.assertEqual(deep["max_completion_tokens"], 64000)
 
     def test_workflow_uses_owner_gate_trusted_checkout_and_runner_defaults(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
