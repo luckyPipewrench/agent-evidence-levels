@@ -67,11 +67,15 @@ func TestArgvListPreservesConformanceArguments(t *testing.T) {
 		"--conformance-command=--json",
 		"--conformance-command=--out",
 		"--conformance-command=./fixtures",
+		// An element containing a space is the case whitespace splitting cannot
+		// express, so it is the only case that proves per-occurrence collection.
+		// Without it the test passes against a Set that splits on whitespace.
+		"--conformance-command=/opt/my suite/extra corpus",
 	}
 	if err := flags.Parse(arguments); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"./bin/aelgen", "--report", "--json", "--out", "./fixtures"}
+	want := []string{"./bin/aelgen", "--report", "--json", "--out", "./fixtures", "/opt/my suite/extra corpus"}
 	if !reflect.DeepEqual([]string(command), want) {
 		t.Errorf("command = %#v, want %#v", []string(command), want)
 	}

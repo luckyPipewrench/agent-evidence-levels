@@ -267,6 +267,17 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := assertCapturedPackageBlob(files, emitConformancePath, conformance.result); err != nil {
 		return EmitResult{}, err
 	}
+	// All THREE result paths are exempt from the input comparison, so all three
+	// need this binding. Binding only the conformance result left the machine
+	// output and stderr reachable by the same escaped descendant, and the
+	// machine output is what the validator reads to derive discovered runs, so a
+	// rewrite there is signed and then believed.
+	if err := assertCapturedPackageBlob(files, emitMachineOutput, evaluation.machineOutput); err != nil {
+		return EmitResult{}, err
+	}
+	if err := assertCapturedPackageBlob(files, emitStderrPath, evaluation.stderr); err != nil {
+		return EmitResult{}, err
+	}
 	// The replica is the exact tree the checker evaluated. Compare its inputs
 	// with the final file list immediately before signing so a write after the
 	// replica was copied cannot turn a valid evaluation of one artifact into a
