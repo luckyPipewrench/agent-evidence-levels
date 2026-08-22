@@ -305,12 +305,10 @@ func writePackageFixtures(root string) error {
 	}); err != nil {
 		return err
 	}
-	if relabeled, err := writePackageFixture(root, "evaluation_relabelled", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+	if missingVerifier, err := writePackageFixture(root, "verification_record_missing_verifier", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
 		return err
-	} else if err := rewritePackageManifest(relabeled.packageDir, "package-operator", func(manifest map[string]any) error {
-		manifest["kind"] = "verification-record"
-		operator := manifest["operator"].(map[string]any)
-		delete(operator, "key")
+	} else if err := rewritePackageManifest(missingVerifier.packageDir, "package-verifier", func(manifest map[string]any) error {
+		delete(manifest, "verifier")
 		return nil
 	}); err != nil {
 		return err
@@ -953,7 +951,7 @@ func writePackageFixtureExpectations(root string) error {
 		"referenced_conformance_result_absent_from_files":       {"diagnostic": "referenced blob \"results/conformance.json\" is absent from file manifest"},
 		"verification_input_absent_from_files":                  {"diagnostic": "referenced blob \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" is absent from file manifest"},
 		"verification_input_binding_mismatch":                   {"diagnostic": "referenced blob \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" does not match file manifest"},
-		"evaluation_relabelled":                                 {"diagnostic": "missing required top-level key \"verifier\""},
+		"verification_record_missing_verifier":                  {"diagnostic": "missing required top-level key \"verifier\""},
 		"evaluation_rewrapped_by_operator":                      {"diagnostic": "missing trusted package signer key"},
 		"verifier_is_producer":                                  {"diagnostic": "verifier must not equal producer"},
 		"verifier_is_operator":                                  {"diagnostic": "verifier must not equal operator"},
