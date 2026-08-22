@@ -8,7 +8,7 @@ reviews:
   profile: "assertive"
   request_changes_workflow: false  # advisory only, must never block a merge
   high_level_summary: true
-  poem: false
+  poem: true
   review_status: true
 
   auto_review:
