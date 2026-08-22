@@ -31,4 +31,4 @@ and read it, so a producer must not invent a key that collides with one. Claimed
 Note: these schemas describe structural shape. They do not and cannot express AEL's real guarantees
 (signature verification over exact bytes, canonical-form equality, hash-linked ordering, the
 minimum-over-sub-dimensions grade). Those live in the reference checker, which is the conformance
-authority. A payload that passes the schema can still fail the checker, by design.
+authority. A payload that passes the schema can still fail the checker, by design. Status freshness is the clearest current example. A schema can require `next_update` on a `current` statement, but it cannot compare two fields, so it cannot require `next_update` to be later than `issued_at`, and under Draft 2020-12 `format` is an annotation a validator may ignore. Both rules are enforced by the checker and stated normatively in `SPEC.md` section 5.2. Treating schema validity as status validity is therefore a mistake, and an implementer building only from these files would accept statements the standard rejects.
