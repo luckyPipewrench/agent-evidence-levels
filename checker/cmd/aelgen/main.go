@@ -228,6 +228,23 @@ func writePackageFixtures(root string) error {
 	}); err != nil {
 		return err
 	}
+	for _, kind := range []string{"evaluation-package", "verification-record"} {
+		name := strings.ReplaceAll(kind, "-", "_")
+		if duplicateFile, err := writePackageFixture(root, "duplicate_file_path_"+name, kind, "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+			return err
+		} else if err := rewritePackageManifest(duplicateFile.packageDir, packageFixtureSignerLabel(kind), func(manifest map[string]any) error {
+			return duplicatePackageBlob(manifest, "files")
+		}); err != nil {
+			return err
+		}
+		if duplicateInput, err := writePackageFixture(root, "duplicate_verification_input_path_"+name, kind, "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+			return err
+		} else if err := rewritePackageManifest(duplicateInput.packageDir, packageFixtureSignerLabel(kind), func(manifest map[string]any) error {
+			return duplicatePackageBlob(manifest, "verification_inputs")
+		}); err != nil {
+			return err
+		}
+	}
 	if relabeled, err := writePackageFixture(root, "evaluation_relabelled", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
 		return err
 	} else if err := rewritePackageManifest(relabeled.packageDir, "package-operator", func(manifest map[string]any) error {
@@ -714,6 +731,31 @@ func rewritePackageManifestWithoutSignature(packageDir string, change func(map[s
 	return os.WriteFile(filepath.Join(packageDir, "manifest.json"), raw, 0o644)
 }
 
+func packageFixtureSignerLabel(kind string) string {
+	if kind == "evaluation-package" {
+		return "package-operator"
+	}
+	return "package-verifier"
+}
+
+func duplicatePackageBlob(manifest map[string]any, field string) error {
+	values, ok := manifest[field].([]any)
+	if !ok || len(values) == 0 {
+		return fmt.Errorf("fixture %s is empty or has wrong type", field)
+	}
+	first, ok := values[0].(map[string]any)
+	if !ok {
+		return fmt.Errorf("fixture %s entry has wrong type", field)
+	}
+	duplicate := make(map[string]any, len(first)+1)
+	for key, value := range first {
+		duplicate[key] = value
+	}
+	duplicate["url"] = "https://example.invalid/duplicate"
+	manifest[field] = append(values, duplicate)
+	return nil
+}
+
 func writeFixturePublicKey(root, fingerprint string, pub ed25519.PublicKey) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
@@ -774,36 +816,40 @@ func writeFixtureStatusDefinition(path, signaturePath, recordID string, definiti
 
 func writePackageFixtureExpectations(root string) error {
 	expected := map[string]map[string]string{
-		"valid_verification_record":                   {"display_state": "VERIFIED"},
-		"valid_evaluation_package":                    {"display_state": "EVALUATED"},
-		"manifest_signature_tampered":                 {"diagnostic": "package manifest signature verification failed"},
-		"evaluation_carries_grade":                    {"diagnostic": "unknown top-level key \"grades\""},
-		"undeclared_signer_key":                       {"diagnostic": "package signer public key is absent from verification inputs"},
-		"tampered_blob":                               {"diagnostic": "blob \"results/stdout.txt\" size or digest mismatch"},
-		"missing_blob":                                {"diagnostic": "required blob \"results/stderr.txt\" is missing"},
-		"path_escape":                                 {"diagnostic": "file manifest entry path: must be a normalized relative path"},
-		"evaluation_relabelled":                       {"diagnostic": "missing required top-level key \"verifier\""},
-		"evaluation_rewrapped_by_operator":            {"diagnostic": "missing trusted package signer key"},
-		"verifier_is_producer":                        {"diagnostic": "verifier must not equal producer"},
-		"verifier_is_operator":                        {"diagnostic": "verifier must not equal operator"},
-		"omitted_discovered_run":                      {"diagnostic": "artifact binding discovered runs"},
-		"binding_omits_discovered_run":                {"diagnostic": "artifact binding discovered runs"},
-		"grades_omit_discovered_run":                  {"diagnostic": "verification record grades do not cover every discovered run"},
-		"evaluation_failed":                           {"display_state": "EVALUATION-FAILED"},
-		"conformance_failed":                          {"display_state": "CONFORMANCE-FAILED"},
-		"expired_record":                              {"display_state": "EXPIRED"},
-		"empty_conformance_command":                   {"diagnostic": "conformance command must not be empty"},
-		"grade_disagrees_with_result":                 {"diagnostic": "disagrees with artifact evaluation machine output"},
-		"revoked_replay":                              {"display_state": "REVOKED"},
-		"superseded_replay":                           {"display_state": "SUPERSEDED"},
-		"status_current_stale":                        {"display_state": "STATUS-UNKNOWN"},
-		"status_current_future_issued_at":             {"display_state": "STATUS-UNKNOWN"},
-		"status_current_at_issued_at":                 {"display_state": "VERIFIED"},
-		"status_current_at_next_update":               {"display_state": "STATUS-UNKNOWN"},
-		"status_current_missing_next_update":          {"display_state": "STATUS-UNKNOWN"},
-		"status_current_next_update_equals_issued_at": {"display_state": "STATUS-UNKNOWN"},
-		"status_current_next_update_before_issued_at": {"display_state": "STATUS-UNKNOWN"},
-		"status_signature_tampered":                   {"display_state": "STATUS-UNKNOWN"},
+		"valid_verification_record":                             {"display_state": "VERIFIED"},
+		"valid_evaluation_package":                              {"display_state": "EVALUATED"},
+		"manifest_signature_tampered":                           {"diagnostic": "package manifest signature verification failed"},
+		"evaluation_carries_grade":                              {"diagnostic": "unknown top-level key \"grades\""},
+		"undeclared_signer_key":                                 {"diagnostic": "package signer public key is absent from verification inputs"},
+		"tampered_blob":                                         {"diagnostic": "blob \"results/stdout.txt\" size or digest mismatch"},
+		"missing_blob":                                          {"diagnostic": "required blob \"results/stderr.txt\" is missing"},
+		"path_escape":                                           {"diagnostic": "file manifest entry path: must be a normalized relative path"},
+		"duplicate_file_path_evaluation_package":                {"diagnostic": "file manifest lists \"artifact/manifest.json\" more than once"},
+		"duplicate_file_path_verification_record":               {"diagnostic": "file manifest lists \"artifact/manifest.json\" more than once"},
+		"duplicate_verification_input_path_evaluation_package":  {"diagnostic": "verification inputs list \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" more than once"},
+		"duplicate_verification_input_path_verification_record": {"diagnostic": "verification inputs list \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" more than once"},
+		"evaluation_relabelled":                                 {"diagnostic": "missing required top-level key \"verifier\""},
+		"evaluation_rewrapped_by_operator":                      {"diagnostic": "missing trusted package signer key"},
+		"verifier_is_producer":                                  {"diagnostic": "verifier must not equal producer"},
+		"verifier_is_operator":                                  {"diagnostic": "verifier must not equal operator"},
+		"omitted_discovered_run":                                {"diagnostic": "artifact binding discovered runs"},
+		"binding_omits_discovered_run":                          {"diagnostic": "artifact binding discovered runs"},
+		"grades_omit_discovered_run":                            {"diagnostic": "verification record grades do not cover every discovered run"},
+		"evaluation_failed":                                     {"display_state": "EVALUATION-FAILED"},
+		"conformance_failed":                                    {"display_state": "CONFORMANCE-FAILED"},
+		"expired_record":                                        {"display_state": "EXPIRED"},
+		"empty_conformance_command":                             {"diagnostic": "conformance command must not be empty"},
+		"grade_disagrees_with_result":                           {"diagnostic": "disagrees with artifact evaluation machine output"},
+		"revoked_replay":                                        {"display_state": "REVOKED"},
+		"superseded_replay":                                     {"display_state": "SUPERSEDED"},
+		"status_current_stale":                                  {"display_state": "STATUS-UNKNOWN"},
+		"status_current_future_issued_at":                       {"display_state": "STATUS-UNKNOWN"},
+		"status_current_at_issued_at":                           {"display_state": "VERIFIED"},
+		"status_current_at_next_update":                         {"display_state": "STATUS-UNKNOWN"},
+		"status_current_missing_next_update":                    {"display_state": "STATUS-UNKNOWN"},
+		"status_current_next_update_equals_issued_at":           {"display_state": "STATUS-UNKNOWN"},
+		"status_current_next_update_before_issued_at":           {"display_state": "STATUS-UNKNOWN"},
+		"status_signature_tampered":                             {"display_state": "STATUS-UNKNOWN"},
 	}
 	for name, value := range expected {
 		raw, err := canonicalValue(value)

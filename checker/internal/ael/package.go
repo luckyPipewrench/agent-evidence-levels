@@ -1001,20 +1001,27 @@ func isSHA256(value string) bool {
 func validatePackageBlobs(root string, manifest *PackageManifest) error {
 	declared := map[string]PackageBlob{}
 	for _, blob := range manifest.Files {
-		if err := validateBlobShape("file manifest entry", blob); err != nil {
+		name, err := normalizedPackageBlobPath("file manifest entry", blob)
+		if err != nil {
 			return err
 		}
-		if _, exists := declared[blob.Path]; exists {
-			return fmt.Errorf("file manifest lists %q more than once", blob.Path)
+		if _, exists := declared[name]; exists {
+			return fmt.Errorf("file manifest lists %q more than once", name)
 		}
-		declared[blob.Path] = blob
+		declared[name] = blob
 	}
+	verificationInputs := map[string]bool{}
 	for _, blob := range manifest.VerificationInputs {
-		if err := validateBlobShape("verification input", blob); err != nil {
+		name, err := normalizedPackageBlobPath("verification input", blob)
+		if err != nil {
 			return err
 		}
-		if _, ok := declared[blob.Path]; !ok {
-			return fmt.Errorf("verification input %q is absent from file manifest", blob.Path)
+		if verificationInputs[name] {
+			return fmt.Errorf("verification inputs list %q more than once", name)
+		}
+		verificationInputs[name] = true
+		if _, ok := declared[name]; !ok {
+			return fmt.Errorf("verification input %q is absent from file manifest", name)
 		}
 	}
 	for _, ref := range packageRequiredBlobs(manifest) {
@@ -1076,6 +1083,13 @@ func validatePackageBlobs(root string, manifest *PackageManifest) error {
 		}
 	}
 	return nil
+}
+
+func normalizedPackageBlobPath(name string, blob PackageBlob) (string, error) {
+	if err := validateBlobShape(name, blob); err != nil {
+		return "", err
+	}
+	return path.Clean(blob.Path), nil
 }
 
 func packageRequiredBlobs(manifest *PackageManifest) []PackageBlob {
