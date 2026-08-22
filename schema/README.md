@@ -8,6 +8,11 @@ validating fixtures. `docs/ARTIFACT-FORMAT.md` is the normative source; these sc
 - `record-payload.schema.json` — the canonical JSON payload inside each signed record line.
 - `manifest.schema.json` — the artifact table of contents (untrusted; see the trust-model note in
   `docs/ARTIFACT-FORMAT.md`).
+- `evaluation-package.schema.json` — an operator-signed evaluation package. Its closed shape has no
+  grade-bearing property.
+- `verification-record.schema.json` — an eligible-verifier-signed record that may carry per-run
+  grade lines, annotations, and PASS / FAIL / UV outcomes.
+- `verification-status.schema.json` — a separately signed statement whose `current` state is accepted only through its authority-chosen `next_update`; it never edits the historical verification record.
 
 The `anchors.json` and `counterparty.jsonl` payload shapes are specified in `docs/ARTIFACT-FORMAT.md`
 sections 6 and 7; schemas for them are a v0.2 addition.

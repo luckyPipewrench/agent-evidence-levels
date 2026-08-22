@@ -29,10 +29,7 @@ This separation matters because qualifiers disappear. A dashboard copied from "s
 soon becomes a chart labeled "AEL-1." Keeping the number out of producer declarations prevents that
 loss of context.
 
-Run closure and verification are separate facts. `OPEN`, `CLOSED`, and `ABNORMAL-END` come from the
-run evidence. `VERIFIED` comes from a trusted verification record whose bindings and packaged blobs
-match that run. A closed run can be pending verification, and an open snapshot can be independently
-checked but cannot earn AEL-1 because it has no signed close.
+Run closure and verification are separate facts. `OPEN`, `CLOSED`, and `ABNORMAL-END` come from the run evidence. `VERIFIED` comes from a trusted verification record whose bindings and packaged blobs match that run, plus a fresh current-status statement accepted under relying policy. A closed run can be pending verification, and an open snapshot can be independently checked but cannot earn AEL-1 because it has no signed close.
 
 An old result remains evidence of what the exact artifact demonstrated at evaluation time. It does
 not become a current product grade. A buyer can require a recent checker revision, a recognized

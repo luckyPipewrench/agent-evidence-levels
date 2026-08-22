@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-evidence-levels.example/schema/verification-status.schema.json",
+  "title": "AEL verification record status statement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status_format", "record_id", "authority", "issued_at", "state"],
+  "properties": {
+    "status_format": { "const": 1 },
+    "record_id": { "type": "string", "minLength": 1 },
+    "authority": { "type": "string", "minLength": 1 },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "next_update": { "type": "string", "format": "date-time" },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["current", "revoked", "superseded"] },
+    "reason": { "type": "string", "minLength": 1 },
+    "replacement": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    { "if": { "properties": { "state": { "const": "current" } } }, "then": { "required": ["next_update"] } },
+    { "if": { "properties": { "state": { "const": "revoked" } } }, "then": { "required": ["reason", "effective_at"] } },
+    { "if": { "properties": { "state": { "const": "superseded" } } }, "then": { "required": ["reason", "replacement", "effective_at"] } }
+  ]
+}
