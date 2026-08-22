@@ -16,6 +16,14 @@ import (
 const exitNotCurrent = 3
 
 func main() {
+	// emit is dispatched before flag parsing so the existing validate form,
+	// which takes its flags before the verb, keeps its exact contract. A
+	// caller's working command must not change meaning because a second verb
+	// was added next to it.
+	if len(os.Args) > 1 && os.Args[1] == "emit" {
+		os.Exit(runEmit(os.Args[2:]))
+	}
+
 	jsonOut := flag.Bool("json", false, "print machine-readable validation result")
 	keysDir := flag.String("keys", "", "trust root containing operators/, verifiers/, and status/ key directories")
 	statusPath := flag.String("status", "", "separately signed verification status statement")
@@ -25,7 +33,7 @@ func main() {
 	flag.Parse()
 
 	if *keysDir == "" || flag.NArg() != 2 || flag.Arg(0) != "validate" {
-		fmt.Fprintln(os.Stderr, "usage: aelpackage [--json] --keys <trust-root> [--status <status.json> --status-signature <status.sig> --status-at <RFC3339> --max-status-age <duration>] validate <package-dir>")
+		fmt.Fprintln(os.Stderr, "usage: aelpackage emit --artifact <dir> ... --out <dir>\n   or: aelpackage [--json] --keys <trust-root> [--status <status.json> --status-signature <status.sig> --status-at <RFC3339> --max-status-age <duration>] validate <package-dir>")
 		os.Exit(2)
 	}
 	var evaluationTime time.Time
