@@ -132,6 +132,17 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, fmt.Errorf("package directory %q is not empty", packageDir)
 	}
 
+	// A failed emit removes its own debris. The directory was verified empty
+	// just above, so everything inside it is ours. Leaving a half-written
+	// package behind turns one clear failure into a second, confusing one when
+	// the retry reports a directory that is no longer empty.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = os.RemoveAll(packageDir)
+		}
+	}()
+
 	if err := copyTree(options.ArtifactDir, filepath.Join(packageDir, emitArtifactDir)); err != nil {
 		return EmitResult{}, fmt.Errorf("copy artifact: %w", err)
 	}
@@ -170,7 +181,14 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 
 	var report Report
 	if err := json.Unmarshal(evaluation.machineOutput, &report); err != nil {
-		return EmitResult{}, fmt.Errorf("parse checker machine output: %w", err)
+		// The checker's own stderr says why it could not evaluate, and
+		// reporting only the JSON parse error would hide that diagnosis behind
+		// a symptom the operator cannot act on.
+		diagnosis := strings.TrimSpace(string(evaluation.stderr))
+		if diagnosis == "" {
+			diagnosis = "checker produced no diagnostic output"
+		}
+		return EmitResult{}, fmt.Errorf("checker exited %d without a usable report: %s", evaluation.exitStatus, diagnosis)
 	}
 	discovered := discoveredPackageRuns(report)
 	if len(discovered) == 0 {
@@ -294,6 +312,7 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, err
 	}
 
+	succeeded = true
 	return EmitResult{
 		PackageDir:     packageDir,
 		PackageID:      options.PackageID,
@@ -307,6 +326,7 @@ type emitEvaluation struct {
 	arguments     []string
 	exitStatus    int
 	machineOutput []byte
+	stderr        []byte
 }
 
 // runEmitEvaluation executes the checker from inside the package directory so
@@ -355,7 +375,7 @@ func runEmitEvaluation(packageDir, checkerRelative string) (emitEvaluation, erro
 		}
 	}
 
-	return emitEvaluation{arguments: machineArgs, exitStatus: machineExit, machineOutput: machineStdout}, nil
+	return emitEvaluation{arguments: machineArgs, exitStatus: machineExit, machineOutput: machineStdout, stderr: machineStderr}, nil
 }
 
 // runChecker runs one checker invocation. A nonzero exit is a result, not an

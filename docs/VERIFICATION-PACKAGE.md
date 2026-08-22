@@ -25,6 +25,57 @@ The two kinds use different schemas:
 Neither package schema permits `claimed_rung`. That field remains only in the deprecated producer
 artifact manifest field described in `docs/ARTIFACT-FORMAT.md`.
 
+## Emit an evaluation package
+
+`aelpackage emit` runs the checker against an artifact and writes a signed evaluation package
+recording what happened. It records rather than declares: the executable is digested as shipped, its
+stdout, stderr, and exit status are captured from the run, and the discovered runs come from the
+checker's machine output rather than from the caller.
+
+```sh
+make build
+./bin/aelpackage emit \
+  --artifact ./artifact --artifact-keys ./artifact/keys \
+  --checker ./bin/aelcheck --source-revision "$(git rev-parse --short HEAD)" \
+  --operator-key ./operator.key --operator-id my-operator --producer-id my-producer \
+  --status-authority-id my-status-authority --status-key ./status.pub \
+  --spec ./specification.txt --spec-version 0.1 \
+  --corpus-digest-source ./corpus-id.txt --corpus-version v1 \
+  --conformance-result ./conformance.json --conformance-command "make check" \
+  --id my-package-001 --out ./package
+```
+
+The command emits evaluation packages only, and has no flag to choose the kind. A verification
+record must be signed by a verifier whom the validator rejects when their identity equals the
+producer or the operator, and the party running an emitter is the operator, so the only record it
+could produce is one that can never validate. The grade is another party's signature to write.
+
+The operator key is standard padded base64 holding either a 32-byte Ed25519 seed or a 64-byte
+private key. A key file readable by other accounts is refused, because the package's authority rests
+on that key being the operator's alone.
+
+Exit statuses distinguish the two failures that demand opposite responses:
+
+| Status | Meaning |
+|---|---|
+| 0 | The package was written and the artifact conformed. |
+| 1 | No package exists; the emit itself failed. |
+| 2 | Usage error. |
+| 3 | The package was written and the artifact did not conform. |
+
+Status 3 is the case worth reading twice. A nonconforming artifact is still packaged, carrying its
+real exit status, and the validator then displays it as `EVALUATION-FAILED`. Refusing to emit there
+would turn every negative result into a missing file, which is the one outcome a reader cannot
+distinguish from work nobody did.
+
+The emitted package replays. Its recorded evaluation arguments are relative to the package root, so
+a reader can run the shipped checker against the shipped artifact and reproduce the signed machine
+output byte for byte:
+
+```sh
+cd ./package && ./checker/aelcheck --json --keys inputs/keys artifact
+```
+
 ## Validate a package
 
 Build the commands, then pass the package directory and a trust root of separately trusted public

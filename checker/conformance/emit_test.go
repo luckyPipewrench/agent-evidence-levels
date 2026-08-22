@@ -254,3 +254,41 @@ func TestEmitRefusesOutputInsideArtifact(t *testing.T) {
 		t.Errorf("emit created the output directory before refusing: %v", err)
 	}
 }
+
+// TestEmitRemovesPartialPackageOnFailure covers debris found by probing: a
+// refused copy used to leave a half-written package behind, so the operator's
+// retry failed a second time on a directory that was no longer empty.
+func TestEmitRemovesPartialPackageOnFailure(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	// A missing specification fails after the artifact has been copied, which
+	// is the point in the sequence where debris used to accumulate.
+	harness.options.SpecPath = filepath.Join(t.TempDir(), "absent.txt")
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
+		t.Fatal("emit accepted a missing specification")
+	}
+	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
+		t.Errorf("failed emit left a partial package behind: %v", err)
+	}
+}
+
+// TestEmitReportsCheckerDiagnosis covers a diagnosability gap found by probing:
+// an artifact the checker cannot load produced only a JSON parse error, hiding
+// the checker's own explanation of what was actually wrong.
+func TestEmitReportsCheckerDiagnosis(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	unloadable := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(unloadable, "keys"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ArtifactDir = unloadable
+	harness.options.ArtifactKeysDir = filepath.Join(unloadable, "keys")
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted an artifact the checker cannot load")
+	}
+	if indexOf(err.Error(), "manifest.json") < 0 {
+		t.Errorf("error does not carry the checker's diagnosis: %v", err)
+	}
+}
