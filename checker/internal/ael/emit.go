@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -204,10 +205,21 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, err
 	}
 
+	// Re-snapshot now that conformance has written its result. The first
+	// snapshot predates that file, so it could only be carried forward as an
+	// exemption, and carrying the exemption into the checker's check left the
+	// conformance evidence as the one file a later subprocess could rewrite and
+	// have signed. From here nothing may change, that result included.
+	inputs, err = packageFileBlobs(packageDir)
+	if err != nil {
+		return EmitResult{}, err
+	}
+
 	// The checker runs inside the package so its relative replay arguments are
-	// literal. The same snapshot rejects any persistent mutation from that
-	// invocation too: otherwise the manifest could digest a replacement binary
-	// or artifact rather than the bytes that produced its recorded result.
+	// literal. The refreshed snapshot rejects any persistent mutation from that
+	// invocation: otherwise the manifest could digest a replacement binary,
+	// artifact, or conformance result rather than the bytes that produced its
+	// recorded outcome.
 	evaluation, err := runEmitEvaluation(packageDir, checkerRelative, inputs, options.CommandTimeout)
 	if err != nil {
 		return EmitResult{}, err
@@ -382,7 +394,7 @@ func runEmitEvaluation(packageDir, checkerRelative string, inputs []PackageBlob,
 	if err != nil {
 		return emitEvaluation{}, err
 	}
-	if err := assertPackageInputsUnchanged(packageDir, inputs, emitConformancePath); err != nil {
+	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
 		return emitEvaluation{}, err
 	}
 
@@ -425,27 +437,6 @@ const defaultCommandTimeout = 30 * time.Minute
 // that outlived the signal cannot block emission indefinitely.
 const subprocessWaitDelay = 10 * time.Second
 
-// boundedBuffer accumulates output up to a limit and then refuses.
-//
-// It errors rather than truncating on purpose. Truncated output is the worse
-// failure here: a clipped conformance report can still parse, so the package
-// would carry evidence that reads as complete while describing a partial run.
-type boundedBuffer struct {
-	limit    int
-	name     string
-	buffer   []byte
-	exceeded bool
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if len(b.buffer)+len(p) > b.limit {
-		b.exceeded = true
-		return 0, fmt.Errorf("%s exceeded %d bytes", b.name, b.limit)
-	}
-	b.buffer = append(b.buffer, p...)
-	return len(p), nil
-}
-
 // runChecker runs one subprocess invocation under an output limit and a
 // deadline. A nonzero exit is a result, not an error; only a failure to execute,
 // an exceeded output limit, or an expired deadline is an error, because those
@@ -457,18 +448,39 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Streams go to FILES, not pipes, and the reason is a timing bug rather
+	// than taste. A descendant inherits the parent's stdout, so with a pipe
+	// Run blocks until that descendant closes it, and returns only after
+	// WaitDelay. Reaping the group "once Run returns" therefore fired ten
+	// seconds late in exactly the case the reap exists for: a command that
+	// exits immediately and leaves a writer behind. Measured, the descendant
+	// had already altered the package by then. A file is not held open in any
+	// way that delays Run, so Run returns when the direct child exits and the
+	// group is signalled while the descendant is still asleep.
+	outFile, errFile, cleanup, err := subprocessOutputFiles()
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer cleanup()
+
 	command := exec.CommandContext(ctx, checker, args...)
 	command.Dir = dir
 	boundSubprocessLifetime(command)
-	outBuffer := &boundedBuffer{limit: maxSubprocessStdout, name: "stdout"}
-	errBuffer := &boundedBuffer{limit: maxSubprocessStderr, name: "stderr"}
-	command.Stdout = outBuffer
-	command.Stderr = errBuffer
-	runErr := command.Run()
-	stdout = outBuffer.buffer
-	stderr = errBuffer.buffer
+	command.Stdout = outFile
+	command.Stderr = errFile
 
-	if outBuffer.exceeded || errBuffer.exceeded {
+	runErr := command.Run()
+	reapSubprocessGroup(command)
+
+	stdout, stdoutExceeded, err := readBoundedFile(outFile, maxSubprocessStdout)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	stderr, stderrExceeded, err := readBoundedFile(errFile, maxSubprocessStderr)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if stdoutExceeded || stderrExceeded {
 		return nil, nil, 0, fmt.Errorf("command %s %v produced more output than the emitter accepts (stdout limit %d, stderr limit %d)",
 			checker, args, maxSubprocessStdout, maxSubprocessStderr)
 	}
@@ -483,6 +495,53 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 		return stdout, stderr, exitError.ExitCode(), nil
 	}
 	return stdout, stderr, 0, nil
+}
+
+// subprocessOutputFiles creates the two capture files outside the package, so
+// nothing a subprocess writes lands in the tree being signed.
+func subprocessOutputFiles() (out, errOut *os.File, cleanup func(), err error) {
+	out, err = os.CreateTemp("", "ael-emit-stdout-")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create stdout capture: %w", err)
+	}
+	errOut, err = os.CreateTemp("", "ael-emit-stderr-")
+	if err != nil {
+		_ = out.Close()
+		_ = os.Remove(out.Name())
+		return nil, nil, nil, fmt.Errorf("create stderr capture: %w", err)
+	}
+	return out, errOut, func() {
+		_ = out.Close()
+		_ = errOut.Close()
+		_ = os.Remove(out.Name())
+		_ = os.Remove(errOut.Name())
+	}, nil
+}
+
+// readBoundedFile reads a capture file and reports whether it exceeded the
+// limit. The size is checked before reading so an oversized capture is never
+// pulled into memory to discover it was oversized.
+//
+// An over-limit capture is refused rather than truncated. Truncation is the
+// worse failure here: a clipped conformance report can still parse, so the
+// package would carry evidence that reads as complete while describing a
+// partial run.
+func readBoundedFile(file *os.File, limit int64) ([]byte, bool, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, false, fmt.Errorf("stat subprocess output: %w", err)
+	}
+	if info.Size() > limit {
+		return nil, true, nil
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("rewind subprocess output: %w", err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, limit))
+	if err != nil {
+		return nil, false, fmt.Errorf("read subprocess output: %w", err)
+	}
+	return raw, false, nil
 }
 
 // validateEmitPaths refuses an output directory that overlaps an input.

@@ -818,3 +818,62 @@ func TestEmitRunsConformanceWithoutAShell(t *testing.T) {
 		t.Errorf("the argument did not reach the process literally: %q", packaged)
 	}
 }
+
+// TestEmitRefusesCheckerThatRewritesConformanceEvidence covers the one file a
+// subprocess could still rewrite. The package-input snapshot is taken before
+// conformance runs, so the conformance result is legitimately new relative to
+// it and is exempted from the mutation check. That same exemption was then
+// carried into the check that runs after the CHECKER, which had no business
+// touching the file at all, so the checker could replace the conformance
+// evidence and the replacement was digested and signed.
+func TestEmitRefusesCheckerThatRewritesConformanceEvidence(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	// A checker that overwrites the conformance result, then reports normally.
+	forging := filepath.Join(t.TempDir(), "forging-checker")
+	script := `#!/bin/sh
+printf '{"result":"FORGED"}\n' > results/conformance.json
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
+`
+	if err := os.WriteFile(forging, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.CheckerPath = forging
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit signed conformance evidence the checker rewrote")
+	}
+	// Assert the CHANGED case specifically. Merely naming the file also happens
+	// when the snapshot predates conformance and reports it as added, which is
+	// a different defect wearing the same filename in its message.
+	if indexOf(err.Error(), "changed package input") < 0 || indexOf(err.Error(), "conformance.json") < 0 {
+		t.Errorf("error does not report the conformance evidence as rewritten: %v", err)
+	}
+}
+
+// TestEmitLeavesNoMutatingDescendant covers a subprocess that exits cleanly and
+// leaves a child behind. The process group was signalled only when the context
+// cancelled, so a command could spawn a background writer, exit zero, and have
+// that writer alter the package after the mutation check and before signing.
+func TestEmitLeavesNoMutatingDescendant(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "descendant-wrote-this")
+	spawning := filepath.Join(t.TempDir(), "spawning-conformance.sh")
+	script := "#!/bin/sh\n(sleep 3; printf 'x' > " + probe + ") &\nprintf '{\"result\":\"pass\"}\\n'\n"
+	if err := os.WriteFile(spawning, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{spawning}
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	// Outlive the descendant's delay. If the group was reaped it never runs.
+	time.Sleep(5 * time.Second)
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Errorf("a descendant survived its parent's clean exit and kept writing: %v", err)
+	}
+}

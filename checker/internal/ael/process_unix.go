@@ -30,3 +30,17 @@ func boundSubprocessLifetime(command *exec.Cmd) {
 	}
 	command.WaitDelay = subprocessWaitDelay
 }
+
+// reapSubprocessGroup signals the group after the command has been waited on.
+//
+// Cancel above runs only when the context ends. A command that exits zero was
+// never cancelled, so anything it spawned into the group kept running with the
+// emitter privileges and could write into the staging package between the
+// mutation check and signing. Signalling the group on every return closes that
+// window. A missing group is the ordinary case and the error is discarded.
+func reapSubprocessGroup(command *exec.Cmd) {
+	if command.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+}

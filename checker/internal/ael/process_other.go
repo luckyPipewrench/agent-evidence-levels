@@ -12,3 +12,12 @@ import "os/exec"
 func boundSubprocessLifetime(command *exec.Cmd) {
 	command.WaitDelay = subprocessWaitDelay
 }
+
+// reapSubprocessGroup cannot signal a group on this platform.
+//
+// Stated rather than silently skipped: where process groups are unavailable a
+// descendant that outlives its parent is not terminated here, so the mutation
+// check is the thing standing between such a descendant and a signed package
+// rather than a second line behind this one. The deadline still holds, because
+// WaitDelay stops Run waiting on an inherited pipe.
+func reapSubprocessGroup(command *exec.Cmd) {}
