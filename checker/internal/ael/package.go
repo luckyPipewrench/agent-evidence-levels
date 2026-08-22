@@ -1020,20 +1020,20 @@ func validatePackageBlobs(root string, manifest *PackageManifest) error {
 			return fmt.Errorf("verification inputs list %q more than once", name)
 		}
 		verificationInputs[name] = true
-		if _, ok := declared[name]; !ok {
-			return fmt.Errorf("verification input %q is absent from file manifest", name)
-		}
 	}
-	for _, ref := range packageRequiredBlobs(manifest) {
-		file, ok := declared[ref.Path]
+	for _, ref := range packageReferencedBlobs(manifest) {
+		name, err := normalizedPackageBlobPath("referenced blob", ref)
+		if err != nil {
+			return err
+		}
+		file, ok := declared[name]
 		if !ok {
-			return fmt.Errorf("required blob %q is absent from file manifest", ref.Path)
+			return fmt.Errorf("referenced blob %q is absent from file manifest", name)
 		}
 		if file.Size != ref.Size || file.DigestAlgorithm != ref.DigestAlgorithm || file.Digest != ref.Digest {
-			return fmt.Errorf("required blob %q does not match file manifest", ref.Path)
+			return fmt.Errorf("referenced blob %q does not match file manifest", name)
 		}
 	}
-
 	actual := map[string]bool{}
 	err := filepath.WalkDir(root, func(file string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -1092,8 +1092,8 @@ func normalizedPackageBlobPath(name string, blob PackageBlob) (string, error) {
 	return path.Clean(blob.Path), nil
 }
 
-func packageRequiredBlobs(manifest *PackageManifest) []PackageBlob {
-	return []PackageBlob{
+func packageReferencedBlobs(manifest *PackageManifest) []PackageBlob {
+	references := []PackageBlob{
 		manifest.ArtifactBinding.Manifest,
 		manifest.Checker.Executable,
 		manifest.ArtifactEvaluation.MachineOutput,
@@ -1101,6 +1101,7 @@ func packageRequiredBlobs(manifest *PackageManifest) []PackageBlob {
 		manifest.ArtifactEvaluation.Stderr,
 		manifest.Conformance.Result,
 	}
+	return append(references, manifest.VerificationInputs...)
 }
 
 func validatePackageInputKeys(root string, manifest *PackageManifest) error {

@@ -245,6 +245,66 @@ func writePackageFixtures(root string) error {
 			return err
 		}
 	}
+	for _, reference := range []struct {
+		name   string
+		fields []string
+	}{
+		{name: "artifact_manifest", fields: []string{"artifact_binding", "manifest"}},
+		{name: "checker_executable", fields: []string{"checker", "executable"}},
+		{name: "machine_output", fields: []string{"artifact_evaluation", "machine_output"}},
+		{name: "stdout", fields: []string{"artifact_evaluation", "stdout"}},
+		{name: "stderr", fields: []string{"artifact_evaluation", "stderr"}},
+		{name: "conformance_result", fields: []string{"conformance", "result"}},
+	} {
+		fixtureName := "referenced_" + reference.name + "_absent_from_files"
+		if fixture, err := writePackageFixture(root, fixtureName, "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+			return err
+		} else if err := rewritePackageManifest(fixture.packageDir, "package-verifier", func(manifest map[string]any) error {
+			blob, err := packageFixtureBlob(manifest, reference.fields...)
+			if err != nil {
+				return err
+			}
+			path, ok := blob["path"].(string)
+			if !ok {
+				return fmt.Errorf("fixture %s blob has invalid path", reference.name)
+			}
+			return removePackageFileManifestEntry(manifest, path)
+		}); err != nil {
+			return err
+		}
+	}
+	if inputAbsent, err := writePackageFixture(root, "verification_input_absent_from_files", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(inputAbsent.packageDir, "package-operator", func(manifest map[string]any) error {
+		blob, err := firstPackageFixtureVerificationInput(manifest)
+		if err != nil {
+			return err
+		}
+		path, ok := blob["path"].(string)
+		if !ok {
+			return fmt.Errorf("fixture verification input has invalid path")
+		}
+		return removePackageFileManifestEntry(manifest, path)
+	}); err != nil {
+		return err
+	}
+	if inputMismatch, err := writePackageFixture(root, "verification_input_binding_mismatch", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(inputMismatch.packageDir, "package-operator", func(manifest map[string]any) error {
+		blob, err := firstPackageFixtureVerificationInput(manifest)
+		if err != nil {
+			return err
+		}
+		size, ok := blob["size"].(float64)
+		if !ok {
+			return fmt.Errorf("fixture verification input has invalid size")
+		}
+		blob["size"] = size + 1
+		blob["digest"] = strings.Repeat("0", 64)
+		return nil
+	}); err != nil {
+		return err
+	}
 	if relabeled, err := writePackageFixture(root, "evaluation_relabelled", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
 		return err
 	} else if err := rewritePackageManifest(relabeled.packageDir, "package-operator", func(manifest map[string]any) error {
@@ -756,6 +816,63 @@ func duplicatePackageBlob(manifest map[string]any, field string) error {
 	return nil
 }
 
+func packageFixtureBlob(manifest map[string]any, fields ...string) (map[string]any, error) {
+	var current any = manifest
+	for _, field := range fields {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("fixture package field %q has wrong type", field)
+		}
+		var exists bool
+		current, exists = object[field]
+		if !exists {
+			return nil, fmt.Errorf("fixture package field %q is absent", field)
+		}
+	}
+	blob, ok := current.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("fixture package blob has wrong type")
+	}
+	return blob, nil
+}
+
+func firstPackageFixtureVerificationInput(manifest map[string]any) (map[string]any, error) {
+	inputs, ok := manifest["verification_inputs"].([]any)
+	if !ok || len(inputs) == 0 {
+		return nil, fmt.Errorf("fixture verification inputs are empty or have wrong type")
+	}
+	blob, ok := inputs[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("fixture verification input has wrong type")
+	}
+	return blob, nil
+}
+
+func removePackageFileManifestEntry(manifest map[string]any, path string) error {
+	files, ok := manifest["files"].([]any)
+	if !ok {
+		return fmt.Errorf("fixture files have wrong type")
+	}
+	filtered := make([]any, 0, len(files)-1)
+	removed := false
+	for _, value := range files {
+		blob, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("fixture file entry has wrong type")
+		}
+		if blob["path"] == path {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, blob)
+	}
+	if !removed {
+		return fmt.Errorf("fixture file %q is absent", path)
+	}
+	manifest["files"] = filtered
+	return nil
+}
+
 func writeFixturePublicKey(root, fingerprint string, pub ed25519.PublicKey) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
@@ -828,6 +945,14 @@ func writePackageFixtureExpectations(root string) error {
 		"duplicate_file_path_verification_record":               {"diagnostic": "file manifest lists \"artifact/manifest.json\" more than once"},
 		"duplicate_verification_input_path_evaluation_package":  {"diagnostic": "verification inputs list \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" more than once"},
 		"duplicate_verification_input_path_verification_record": {"diagnostic": "verification inputs list \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" more than once"},
+		"referenced_artifact_manifest_absent_from_files":        {"diagnostic": "referenced blob \"artifact/manifest.json\" is absent from file manifest"},
+		"referenced_checker_executable_absent_from_files":       {"diagnostic": "referenced blob \"checker/aelcheck\" is absent from file manifest"},
+		"referenced_machine_output_absent_from_files":           {"diagnostic": "referenced blob \"results/artifact.json\" is absent from file manifest"},
+		"referenced_stdout_absent_from_files":                   {"diagnostic": "referenced blob \"results/stdout.txt\" is absent from file manifest"},
+		"referenced_stderr_absent_from_files":                   {"diagnostic": "referenced blob \"results/stderr.txt\" is absent from file manifest"},
+		"referenced_conformance_result_absent_from_files":       {"diagnostic": "referenced blob \"results/conformance.json\" is absent from file manifest"},
+		"verification_input_absent_from_files":                  {"diagnostic": "referenced blob \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" is absent from file manifest"},
+		"verification_input_binding_mismatch":                   {"diagnostic": "referenced blob \"inputs/keys/edee7ef9e19355528cf038dace72095337ef76feebcf2aad1d2c71130cb08066.pub\" does not match file manifest"},
 		"evaluation_relabelled":                                 {"diagnostic": "missing required top-level key \"verifier\""},
 		"evaluation_rewrapped_by_operator":                      {"diagnostic": "missing trusted package signer key"},
 		"verifier_is_producer":                                  {"diagnostic": "verifier must not equal producer"},
