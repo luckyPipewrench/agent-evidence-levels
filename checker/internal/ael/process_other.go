@@ -15,11 +15,8 @@ func boundSubprocessLifetime(command *exec.Cmd) {
 
 // reapSubprocessGroup cannot signal a group on this platform.
 //
-// This is resource hygiene, not integrity, and the distinction matters because
-// the earlier design made it load-bearing. The checker now runs against a
-// disposable replica and the emitter writes every packaged byte itself, so a
-// descendant that outlives its parent has nothing in the signed package to
-// reach whether it is terminated or not. What is lost here is the tidy-up: such
-// a descendant may keep running and consuming resources until the operator
-// notices it.
+// This is resource and availability hygiene, not the integrity proof. The
+// emitter's final byte bindings refuse a pre-signing change and the validator
+// rejects a later one, but an unreaped descendant can still consume resources
+// or make an otherwise honest emission fail.
 func reapSubprocessGroup(command *exec.Cmd) {}

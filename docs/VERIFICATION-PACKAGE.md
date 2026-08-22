@@ -40,8 +40,12 @@ make build
   --operator-key ./operator.key --operator-id my-operator --producer-id my-producer \
   --status-authority-id my-status-authority --status-key ./status.pub \
   --spec ./specification.txt --spec-version 0.1 \
-  --corpus-digest-source ./corpus-id.txt --corpus-version v1 \
-  --conformance-command "./bin/aelgen --report --json --out ./fixtures" \
+  --corpus-digest-source ./fixtures/CASES.txt --corpus-version v1 \
+  --conformance-command=./bin/aelgen \
+  --conformance-command=--report \
+  --conformance-command=--json \
+  --conformance-command=--out \
+  --conformance-command=./fixtures \
   --custody-acquisition declared --custody-replay available \
   --custody-review declared --custody-issuance signed \
   --coverage-scope declared --coverage-disclosure complete-package \
@@ -59,15 +63,22 @@ evaluated subject can write. It runs beside the checker executable the operator 
 an operator who can choose what the emitter executes could already execute anything as themselves.
 The checker never runs against the package it is being packaged into. It runs against a disposable
 replica laid out identically, so its recorded arguments still replay verbatim inside the published
-package, while every byte that gets digested and signed is one the emitter wrote and no subprocess
-could reach. Detecting tampering afterwards was the earlier design and it was the wrong shape: a
-check racing a process that holds write access closes one window and opens the next.
+package. Before signing, the emitter compares static package inputs with their pre-subprocess and
+replica snapshots, and compares the packaged conformance result with the direct command's captured
+stdout. A write that changes either result after observation is refused instead of being signed as
+though the checker evaluated it. A sandbox is still the right boundary for a command that must be
+prevented from reaching unrelated same-user paths.
 
-Every subprocess is bounded independently of that: output is capped while it is being written and
-exceeding the cap ends the run, a deadline applies, and on platforms with process groups the group
-is signalled so a wrapper cannot leave a child behind. Where process groups are unavailable that
-last part is resource hygiene rather than integrity, because a surviving descendant has nothing in
-the signed package to reach.
+Every subprocess has an output detection limit, a deadline, and, on platforms with process groups,
+group signalling so a wrapper that stays in its group cannot leave a child behind. Exceeding the
+output limit ends the run instead of packaging a truncated result. The current file-backed capture
+polls for overflow, so it detects an excess rather than enforcing a precise filesystem quota; callers
+that need a hard disk bound must run the emitter in an environment that provides one. A final bounded
+read still refuses an overflow that appears after the last poll, so no oversized result is signed or
+held in memory. Process-group cleanup narrows resource and availability exposure rather than proving
+integrity: the final byte bindings refuse a pre-signing change, and a validator rejects a later one.
+A child that deliberately leaves the group still needs a process sandbox or resource boundary outside
+this command.
 
 The custody and coverage flags are declarations the operator makes and then signs, so they have no
 defaults and the command refuses to run without them. A disclosure claim in particular is something

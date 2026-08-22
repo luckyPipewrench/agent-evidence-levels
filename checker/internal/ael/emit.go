@@ -181,31 +181,25 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := copyFile(options.SpecPath, filepath.Join(packageDir, filepath.FromSlash(emitSpecPath)), 0o644); err != nil {
 		return EmitResult{}, fmt.Errorf("copy specification: %w", err)
 	}
-	// Snapshot every packaged input and the corpus identity BEFORE any
-	// subprocess runs. Both were previously captured after the conformance
-	// command, so whatever that command changed was already baked into the
-	// digests that get signed, and the mutation guard covered the checker only.
-	// The conformance command runs with the emitter's privileges, which a buggy
-	// suite reaches as easily as a hostile one.
+	// Snapshot every packaged input BEFORE any subprocess runs. The conformance
+	// command runs with the emitter's privileges, so final bindings must refuse
+	// any copied input it changes before signing.
 	inputs, err := packageFileBlobs(packageDir)
 	if err != nil {
 		return EmitResult{}, err
-	}
-	corpusDigest, err := fileDigest(options.CorpusDigestPath)
-	if err != nil {
-		return EmitResult{}, fmt.Errorf("digest corpus: %w", err)
 	}
 
 	conformance, err := runConformance(options, packageDir)
 	if err != nil {
 		return EmitResult{}, err
 	}
-	// The conformance command writes its own result into the package, so the
-	// comparison ignores that one path and covers every other input.
-	if err := assertPackageInputsUnchanged(packageDir, inputs, emitConformancePath); err != nil {
-		return EmitResult{}, err
+	// The conformance command may materialize the corpus before reporting over
+	// it, as aelgen does. Bind the identity after that run; a later write to the
+	// captured conformance result is rejected before signing.
+	corpusDigest, err := fileDigest(options.CorpusDigestPath)
+	if err != nil {
+		return EmitResult{}, fmt.Errorf("digest corpus: %w", err)
 	}
-
 	// The checker runs against a DISPOSABLE REPLICA of the package, never the
 	// package itself.
 	//
@@ -220,9 +214,9 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	// subprocess something worth mutating.
 	//
 	// The replica has the same layout, so the recorded arguments stay relative
-	// and still replay verbatim inside the published package. The bytes that
-	// get digested and signed are the ones the emitter copied in, which no
-	// subprocess has ever been able to reach.
+	// and still replay verbatim inside the published package. A later binding
+	// compares the replica inputs, the original input snapshot, and the final
+	// signed file list before publication.
 	evaluation, err := runEmitEvaluationInReplica(packageDir, checkerRelative, options.CommandTimeout)
 	if err != nil {
 		return EmitResult{}, err
@@ -262,6 +256,23 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 
 	files, err := packageFileBlobs(packageDir)
 	if err != nil {
+		return EmitResult{}, err
+	}
+	// All static inputs still have to be the bytes copied before any subprocess
+	// began. The three result paths are the only bytes the emitter creates after
+	// that snapshot.
+	if err := assertPackageInputBlobsMatch(files, inputs, emitConformancePath, emitMachineOutput, emitStderrPath); err != nil {
+		return EmitResult{}, err
+	}
+	if err := assertCapturedPackageBlob(files, emitConformancePath, conformance.result); err != nil {
+		return EmitResult{}, err
+	}
+	// The replica is the exact tree the checker evaluated. Compare its inputs
+	// with the final file list immediately before signing so a write after the
+	// replica was copied cannot turn a valid evaluation of one artifact into a
+	// signature over another. A final write after this comparison invalidates a
+	// digest in files and the package validator rejects it instead.
+	if err := assertEvaluatedInputsMatch(files, evaluation.inputs, evaluation.inputRoots); err != nil {
 		return EmitResult{}, err
 	}
 	blobByPath := map[string]PackageBlob{}
@@ -382,6 +393,8 @@ type emitEvaluation struct {
 	exitStatus    int
 	machineOutput []byte
 	stderr        []byte
+	inputs        []PackageBlob
+	inputRoots    []string
 }
 
 // runEmitEvaluation executes the checker from inside the package directory so
@@ -393,7 +406,7 @@ type emitEvaluation struct {
 // and a package asserting one of two possible outcomes would be a false record.
 // Refusing is the honest direction even though it costs availability.
 func runEmitEvaluationInReplica(packageDir, checkerRelative string, timeout time.Duration) (emitEvaluation, error) {
-	replica, cleanup, err := replicateForEvaluation(packageDir, checkerRelative)
+	replica, cleanup, inputs, err := replicateForEvaluation(packageDir, checkerRelative)
 	if err != nil {
 		return emitEvaluation{}, err
 	}
@@ -405,7 +418,14 @@ func runEmitEvaluationInReplica(packageDir, checkerRelative string, timeout time
 	if err != nil {
 		return emitEvaluation{}, err
 	}
-	return emitEvaluation{arguments: arguments, exitStatus: exitStatus, machineOutput: stdout, stderr: stderr}, nil
+	return emitEvaluation{
+		arguments:     arguments,
+		exitStatus:    exitStatus,
+		machineOutput: stdout,
+		stderr:        stderr,
+		inputs:        inputs,
+		inputRoots:    []string{emitArtifactDir, emitKeysDir, checkerRelative},
+	}, nil
 }
 
 // replicateForEvaluation copies the inputs the checker reads into a throwaway
@@ -415,10 +435,10 @@ func runEmitEvaluationInReplica(packageDir, checkerRelative string, timeout time
 // artifact keys, and the checker executable. The replica is removed afterwards,
 // so anything the checker or a descendant wrote there dies with it, and the
 // package keeps the bytes the emitter put in it.
-func replicateForEvaluation(packageDir, checkerRelative string) (string, func(), error) {
+func replicateForEvaluation(packageDir, checkerRelative string) (string, func(), []PackageBlob, error) {
 	replica, err := os.MkdirTemp("", "ael-emit-replica-")
 	if err != nil {
-		return "", nil, fmt.Errorf("create evaluation replica: %w", err)
+		return "", nil, nil, fmt.Errorf("create evaluation replica: %w", err)
 	}
 	cleanup := func() { _ = os.RemoveAll(replica) }
 
@@ -426,15 +446,20 @@ func replicateForEvaluation(packageDir, checkerRelative string) (string, func(),
 		source := filepath.Join(packageDir, filepath.FromSlash(relative))
 		if err := copyTree(source, filepath.Join(replica, filepath.FromSlash(relative))); err != nil {
 			cleanup()
-			return "", nil, fmt.Errorf("replicate %s: %w", relative, err)
+			return "", nil, nil, fmt.Errorf("replicate %s: %w", relative, err)
 		}
 	}
 	source := filepath.Join(packageDir, filepath.FromSlash(checkerRelative))
 	if err := copyFile(source, filepath.Join(replica, filepath.FromSlash(checkerRelative)), 0o755); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("replicate checker: %w", err)
+		return "", nil, nil, fmt.Errorf("replicate checker: %w", err)
 	}
-	return replica, cleanup, nil
+	inputs, err := packageFileBlobs(replica)
+	if err != nil {
+		cleanup()
+		return "", nil, nil, fmt.Errorf("index evaluation replica: %w", err)
+	}
+	return replica, cleanup, inputs, nil
 }
 
 // writeEvaluationResults records the captured streams into the package. The
@@ -503,7 +528,7 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 	}
 	defer cleanup()
 
-	// A watchdog enforces the size limit while the command runs.
+	// A watchdog detects output past the accepted size while the command runs.
 	//
 	// The obvious shape, wrapping each file in a limiting io.Writer, is wrong
 	// here and the reason is easy to miss: exec only passes an *os.File
@@ -511,7 +536,8 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 	// and copy, and a descendant holding that pipe is precisely what delays Run
 	// past the point where the process group is reaped. Handing exec the real
 	// files keeps Run tied to the direct child, so the size is bounded from
-	// outside instead.
+	// outside instead. This is not a precise disk quota: an overflowing process
+	// can write until the next poll cancels it.
 	limits := &subprocessLimits{
 		files:  []*os.File{outFile, errFile},
 		limits: []int64{maxSubprocessStdout, maxSubprocessStderr},
@@ -539,11 +565,11 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 	if ctx.Err() != nil {
 		return nil, nil, 0, fmt.Errorf("command %s %v did not finish within %s", checker, args, timeout)
 	}
-	stdout, err = readCapturedFile(outFile)
+	stdout, err = readCapturedFile(outFile, maxSubprocessStdout)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	stderr, err = readCapturedFile(errFile)
+	stderr, err = readCapturedFile(errFile, maxSubprocessStderr)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -578,7 +604,8 @@ func subprocessOutputFiles() (out, errOut *os.File, cleanup func(), err error) {
 	}, nil
 }
 
-// subprocessLimits caps how much a running subprocess may write.
+// subprocessLimits detects when a running subprocess exceeds its accepted
+// output size.
 //
 // It polls the capture files and ends the run when either passes its limit.
 // Discarding the overflow without ending the run would bound the disk and leave
@@ -588,6 +615,11 @@ func subprocessOutputFiles() (out, errOut *os.File, cleanup func(), err error) {
 // It refuses rather than truncating. Truncation is the worse failure here: a
 // clipped conformance report can still parse, so the package would carry
 // evidence that reads as complete while describing a partial run.
+//
+// This is a detection limit, not a filesystem quota. A process can write more
+// than the limit before the next poll cancels it, so callers needing a strict
+// disk bound must run the emitter inside an environment with an appropriate
+// resource limit.
 type subprocessLimits struct {
 	files  []*os.File
 	limits []int64
@@ -643,18 +675,24 @@ func (l *subprocessLimits) halt() {
 
 func (l *subprocessLimits) exceeded() bool { return l.over.Load() }
 
-// subprocessSizePollInterval bounds how much a flooding command can write past
-// its limit before the watchdog notices.
+// subprocessSizePollInterval bounds detection latency, not how many bytes a
+// flooding command can write before the watchdog notices.
 const subprocessSizePollInterval = 50 * time.Millisecond
 
-// readCapturedFile reads a capture whose size the writer already bounded.
-func readCapturedFile(file *os.File) ([]byte, error) {
+// readCapturedFile bounds the in-memory copy even if a descendant writes after
+// the watchdog's final stat. A child that escaped the process group can retain
+// the capture descriptor, but it cannot make the emitter allocate or sign more
+// than the accepted evidence limit.
+func readCapturedFile(file *os.File, limit int64) ([]byte, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("rewind subprocess output: %w", err)
 	}
-	raw, err := io.ReadAll(file)
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("read subprocess output: %w", err)
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("subprocess output grew past the accepted limit %d", limit)
 	}
 	return raw, nil
 }
@@ -738,6 +776,7 @@ func pathWithin(candidate, ancestor string) bool {
 
 type conformanceRun struct {
 	exitStatus int
+	result     []byte
 }
 
 // runConformance executes the conformance command and packages what it
@@ -781,7 +820,7 @@ func runConformance(options EmitOptions, packageDir string) (conformanceRun, err
 	if err := os.WriteFile(target, stdout, 0o644); err != nil {
 		return conformanceRun{}, fmt.Errorf("write conformance result: %w", err)
 	}
-	return conformanceRun{exitStatus: exitStatus}, nil
+	return conformanceRun{exitStatus: exitStatus, result: stdout}, nil
 }
 
 func validateEmitOptions(options EmitOptions) error {
@@ -870,6 +909,65 @@ func writeEmitPublicKey(packageDir string, public ed25519.PublicKey) (string, er
 	return fingerprint, nil
 }
 
+// assertEvaluatedInputsMatch binds the signed package inputs to the exact
+// replica bytes the checker read. The checker has no ordinary path back to the
+// package, but another subprocess can outlive its direct parent or a local
+// writer can otherwise reach the staging tree. Comparing the final signed file
+// list, rather than a pre-check snapshot, catches a write in the only interval
+// that matters: after replica construction and before signing.
+func assertEvaluatedInputsMatch(files, evaluated []PackageBlob, roots []string) error {
+	containsInput := func(path string) bool {
+		for _, root := range roots {
+			if path == root || strings.HasPrefix(path, root+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	actual := make([]PackageBlob, 0, len(evaluated))
+	for _, blob := range files {
+		if containsInput(blob.Path) {
+			actual = append(actual, blob)
+		}
+	}
+	for index := 0; index < len(evaluated) || index < len(actual); index++ {
+		if index == len(evaluated) {
+			return fmt.Errorf("package input %q was not evaluated", actual[index].Path)
+		}
+		if index == len(actual) {
+			return fmt.Errorf("evaluated input %q is absent from the package", evaluated[index].Path)
+		}
+		if evaluated[index] != actual[index] {
+			return fmt.Errorf("package input %q differs from the bytes evaluated", actual[index].Path)
+		}
+	}
+	return nil
+}
+
+// assertCapturedPackageBlob binds a package result path to the bytes captured
+// from the direct subprocess. The initial input snapshot excludes this path
+// because the emitter writes it after the subprocess exits, so an escaped
+// descendant must not be able to replace it before signing.
+func assertCapturedPackageBlob(files []PackageBlob, path string, captured []byte) error {
+	sum := sha256.Sum256(captured)
+	expected := PackageBlob{
+		Path:            path,
+		Size:            int64(len(captured)),
+		DigestAlgorithm: "sha-256",
+		Digest:          hex.EncodeToString(sum[:]),
+	}
+	for _, blob := range files {
+		if blob.Path == path {
+			if blob != expected {
+				return fmt.Errorf("a subprocess changed package input %q", path)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("package input %q is absent", path)
+}
+
 // packageFileBlobs digests every file the package will publish. The manifest
 // and its signature are excluded because they cannot describe themselves.
 func packageFileBlobs(packageDir string) ([]PackageBlob, error) {
@@ -919,27 +1017,10 @@ func packageFileBlobs(packageDir string) ([]PackageBlob, error) {
 	return blobs, nil
 }
 
-// assertPackageInputsUnchanged rejects any persistent change to the copied
-// artifact, inputs, or checker across an invocation. The checker produces its
-// streams through pipes; a package-tree change visible after it exits means the
-// recorded evaluation no longer has one stable set of input bytes to bind and
-// must not be signed.
-// assertPackageInputsUnchanged rejects any persistent change a subprocess made
-// to the packaged inputs.
-//
-// Both subprocesses the emitter runs are chosen by the operator and inherit its
-// privileges, so either can reach the staging directory while emission is still
-// in progress. Anything they change there would be digested and signed as
-// though it were what produced the recorded result.
-//
-// expectedNew names paths a subprocess is supposed to create, such as the
-// conformance result it writes by design. Everything else must match the
-// snapshot exactly.
-func assertPackageInputsUnchanged(packageDir string, expected []PackageBlob, expectedNew ...string) error {
-	actual, err := packageFileBlobs(packageDir)
-	if err != nil {
-		return err
-	}
+// assertPackageInputBlobsMatch compares a final package file list with an
+// earlier snapshot. expectedNew names emitter-produced result paths that are
+// absent from the snapshot and therefore do not participate in the comparison.
+func assertPackageInputBlobsMatch(actual, expected []PackageBlob, expectedNew ...string) error {
 	permitted := make(map[string]bool, len(expectedNew))
 	for _, path := range expectedNew {
 		permitted[path] = true

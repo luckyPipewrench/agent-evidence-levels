@@ -106,18 +106,30 @@ func main() {
 		os.Exit(2)
 	}
 	if err := generate(*outDir, *report, *reportJSON); err != nil {
-		// A corpus that disagrees with its expectations is a finding about the
-		// corpus. A reporter that could not run is a finding about the tool.
-		// Collapsing them would let a broken run read as a failing corpus and a
-		// failing corpus read as a broken run.
-		var mismatch *corpusMismatchError
-		if errors.As(err, &mismatch) {
-			fmt.Fprintf(os.Stderr, "aelgen: %v\n", err)
-			os.Exit(exitCorpusMismatch)
-		}
 		fmt.Fprintf(os.Stderr, "aelgen: %v\n", err)
-		os.Exit(1)
+		os.Exit(statusForGenerateError(err))
 	}
+}
+
+// statusForGenerateError maps a generate failure onto a process status.
+//
+// A corpus that disagrees with its expectations is a finding about the corpus.
+// A reporter that could not run is a finding about the tool. Collapsing them
+// would let a broken run read as a failing corpus and a failing corpus read as
+// a broken run, so they get different statuses.
+//
+// This is a named function rather than an inline branch because it is the
+// decision an operator's automation actually reads, and a test that constructs
+// the error itself and asserts on its own construction proves nothing about it.
+func statusForGenerateError(err error) int {
+	if err == nil {
+		return 0
+	}
+	var mismatch *corpusMismatchError
+	if errors.As(err, &mismatch) {
+		return exitCorpusMismatch
+	}
+	return 1
 }
 
 func generate(outDir string, report, reportJSON bool) error {

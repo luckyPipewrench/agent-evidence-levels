@@ -5,9 +5,11 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -49,6 +51,29 @@ func TestRunEmitRejectsTrailingArguments(t *testing.T) {
 	}
 	if !strings.Contains(diagnostic, "unexpected argument") {
 		t.Errorf("diagnostic does not name the trailing argument: %q", diagnostic)
+	}
+}
+
+// TestArgvListPreservesConformanceArguments covers the documented invocation
+// form. A single quoted shell string is one executable path to exec, not a
+// command line, so every intended argv element needs its own repeated flag.
+func TestArgvListPreservesConformanceArguments(t *testing.T) {
+	var command argvList
+	flags := flag.NewFlagSet("emit", flag.ContinueOnError)
+	flags.Var(&command, "conformance-command", "")
+	arguments := []string{
+		"--conformance-command=./bin/aelgen",
+		"--conformance-command=--report",
+		"--conformance-command=--json",
+		"--conformance-command=--out",
+		"--conformance-command=./fixtures",
+	}
+	if err := flags.Parse(arguments); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"./bin/aelgen", "--report", "--json", "--out", "./fixtures"}
+	if !reflect.DeepEqual([]string(command), want) {
+		t.Errorf("command = %#v, want %#v", []string(command), want)
 	}
 }
 

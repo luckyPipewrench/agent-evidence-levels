@@ -134,10 +134,21 @@ func TestGenerateReturnsMismatchError(t *testing.T) {
 		t.Fatalf("exit status = %d, want %d", result.ExitStatus(), exitCorpusMismatch)
 	}
 
-	// The error generate hands main must be the mismatch kind, because main
-	// maps that to status 3 and every other failure to 1.
-	var target *corpusMismatchError
-	if !errors.As(error(&corpusMismatchError{report: result}), &target) {
-		t.Error("generate's mismatch error is not distinguishable from a reporter failure")
+	// Exercise the mapping the command actually reads. The earlier version of
+	// this assertion built a corpusMismatchError and then checked errors.As on
+	// the value it had just built, which tests the standard library rather than
+	// anything here and stays green with the mapping removed.
+	for _, mapping := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"a mismatching corpus", &corpusMismatchError{report: result}, exitCorpusMismatch},
+		{"a reporter that could not run", errors.New("read fixture: permission denied"), 1},
+		{"no failure", nil, 0},
+	} {
+		if got := statusForGenerateError(mapping.err); got != mapping.want {
+			t.Errorf("%s: status = %d, want %d", mapping.name, got, mapping.want)
+		}
 	}
 }
