@@ -42,8 +42,15 @@ make build
   --spec ./specification.txt --spec-version 0.1 \
   --corpus-digest-source ./corpus-id.txt --corpus-version v1 \
   --conformance-result ./conformance.json --conformance-command "make check" \
+  --custody-acquisition declared --custody-replay available \
+  --custody-review declared --custody-issuance signed \
+  --coverage-scope declared --coverage-disclosure complete-package \
   --id my-package-001 --out ./package
 ```
+
+The custody and coverage flags are declarations the operator makes and then signs, so they have no
+defaults and the command refuses to run without them. A disclosure claim in particular is something
+no command can observe on the operator's behalf.
 
 The command emits evaluation packages only, and has no flag to choose the kind. A verification
 record must be signed by a verifier whom the validator rejects when their identity equals the
@@ -68,8 +75,9 @@ real exit status, and the validator then displays it as `EVALUATION-FAILED`. Ref
 would turn every negative result into a missing file, which is the one outcome a reader cannot
 distinguish from work nobody did.
 
-The emitted package replays. Its recorded evaluation arguments are relative to the package root, so
-a reader can run the shipped checker against the shipped artifact and reproduce the signed machine
+The emitted package replays. The checker runs once, so the recorded arguments, exit status, stdout
+and stderr all describe that single execution. Those arguments are relative to the package root, so a
+reader can run the shipped checker against the shipped artifact and reproduce the signed machine
 output byte for byte:
 
 ```sh

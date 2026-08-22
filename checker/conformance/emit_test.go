@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -223,30 +224,59 @@ func TestEmitSelectedRunStillBindsAllDiscoveredRuns(t *testing.T) {
 }
 
 // TestEmitRefusesCheckerExitDisagreement confirms that the JSON and human
-// views cannot record contradictory process conclusions under one package.
-func TestEmitRefusesCheckerExitDisagreement(t *testing.T) {
+// TestEmitRecordsOneInvocation holds the property that replaced a second
+// checker run. The manifest carries a single arguments field, so it can only
+// honestly describe one execution. The emitter previously ran the checker twice
+// and recorded the machine run's arguments and stderr beside the OTHER run's
+// stdout, so the signed evidence described no single execution and the
+// documented byte-for-byte replay did not hold for the stdout it bundled.
+func TestEmitRecordsOneInvocation(t *testing.T) {
 	harness := newEmitHarness(t, "ael1/valid")
-	checker := filepath.Join(t.TempDir(), "disagreeing-checker")
-	const script = `#!/bin/sh
-if [ "$1" = "--json" ]; then
-  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
-  exit 0
-fi
-printf 'human invocation failed\n' >&2
-exit 7
-`
-	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "manifest.json"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	harness.options.CheckerPath = checker
-
-	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
-		t.Fatal("emit accepted disagreeing checker exits")
-	} else if indexOf(err.Error(), "checker is not reproducible") < 0 {
-		t.Errorf("emit rejected checker for the wrong reason: %v", err)
+	var manifest struct {
+		ArtifactEvaluation struct {
+			Arguments     []string `json:"arguments"`
+			MachineOutput struct {
+				Path   string `json:"path"`
+				Digest string `json:"digest"`
+			} `json:"machine_output"`
+			Stdout struct {
+				Path   string `json:"path"`
+				Digest string `json:"digest"`
+			} `json:"stdout"`
+		} `json:"artifact_evaluation"`
 	}
-	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
-		t.Errorf("failed emit left a partial package behind: %v", err)
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	evaluation := manifest.ArtifactEvaluation
+	if evaluation.Stdout.Path != evaluation.MachineOutput.Path {
+		t.Errorf("stdout %q and machine output %q come from different files, so the manifest describes more than one run",
+			evaluation.Stdout.Path, evaluation.MachineOutput.Path)
+	}
+	if evaluation.Stdout.Digest != evaluation.MachineOutput.Digest {
+		t.Errorf("stdout and machine output digests differ: %s vs %s",
+			evaluation.Stdout.Digest, evaluation.MachineOutput.Digest)
+	}
+
+	// The recorded arguments must reproduce the recorded bytes.
+	command := exec.Command("./"+filepath.Join("checker", "aelcheck"), evaluation.Arguments...)
+	command.Dir = harness.options.OutDir
+	replayed, _ := command.Output()
+	recorded, err := os.ReadFile(filepath.Join(harness.options.OutDir, filepath.FromSlash(evaluation.MachineOutput.Path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(replayed) != string(recorded) {
+		t.Error("replaying the recorded arguments did not reproduce the recorded machine output")
 	}
 }
 
@@ -313,12 +343,37 @@ func TestEmitRefusesOutputInsideArtifact(t *testing.T) {
 	harness.options.ArtifactKeysDir = filepath.Join(artifactCopy, "keys")
 	harness.options.OutDir = filepath.Join(artifactCopy, "package")
 
-	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
+	_, err = ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
 		t.Fatal("emit accepted an output directory inside the artifact")
 	}
-	// The refusal must happen before any copying, so nothing is left behind.
-	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
-		t.Errorf("emit created the output directory before refusing: %v", err)
+	// Assert the OVERLAP refusal specifically. Asserting only that OutDir is
+	// absent passes for any failure, because staged assembly never creates it,
+	// so the test stayed green with this guard disabled.
+	if indexOf(err.Error(), "is inside the") < 0 {
+		t.Errorf("error does not name the overlap refusal: %v", err)
+	}
+	// The refusal must precede any copying, so no staging directory exists
+	// inside the artifact either.
+	assertNoStagingResidue(t, artifactCopy)
+}
+
+// assertNoStagingResidue fails when a staging directory was left behind. The
+// emitter stages into a sibling named after the output directory, so residue
+// there is the evidence that assembly began.
+func assertNoStagingResidue(t *testing.T, parent string) {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".aelpackage-") {
+			t.Errorf("staging residue left behind: %s", filepath.Join(parent, entry.Name()))
+		}
 	}
 }
 
@@ -390,6 +445,9 @@ func TestEmitRemovesPartialPackageOnFailure(t *testing.T) {
 	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
 		t.Errorf("failed emit left a partial package behind: %v", err)
 	}
+	// OutDir absence alone is guaranteed by staged assembly, so it cannot show
+	// the cleanup ran. The staging sibling is what the cleanup removes.
+	assertNoStagingResidue(t, filepath.Dir(harness.options.OutDir))
 }
 
 // TestEmitReportsCheckerDiagnosis covers a diagnosability gap found by probing:

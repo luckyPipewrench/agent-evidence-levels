@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -44,7 +45,6 @@ const (
 	emitSpecPath        = "inputs/specification.txt"
 	emitResultsDir      = "results"
 	emitMachineOutput   = "results/artifact.json"
-	emitStdoutPath      = "results/stdout.txt"
 	emitStderrPath      = "results/stderr.txt"
 	emitConformancePath = "results/conformance.json"
 	emitCheckerDir      = "checker"
@@ -115,6 +115,11 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := validateEmitOptions(options); err != nil {
 		return EmitResult{}, err
 	}
+	// A trailing separator makes filepath.Dir return the output directory
+	// itself, so staging lands inside the output and publication then refuses
+	// it as non-empty. Shell completion adds that separator routinely, so the
+	// refusal punished a correct invocation.
+	options.OutDir = filepath.Clean(options.OutDir)
 	if err := validateEmitPaths(options); err != nil {
 		return EmitResult{}, err
 	}
@@ -247,10 +252,11 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err != nil {
 		return EmitResult{}, err
 	}
-	stdout, err := lookup(emitStdoutPath)
-	if err != nil {
-		return EmitResult{}, err
-	}
+	// The recorded invocation's stdout IS the machine output, so both manifest
+	// fields reference that one file. Producing a separate human-readable run to
+	// fill the stdout field bundled a DIFFERENT execution, under different
+	// arguments, into evidence whose arguments field names only one.
+	stdout := machineOutput
 	stderr, err := lookup(emitStderrPath)
 	if err != nil {
 		return EmitResult{}, err
@@ -352,36 +358,21 @@ type emitEvaluation struct {
 func runEmitEvaluation(packageDir, checkerRelative string, inputs []PackageBlob) (emitEvaluation, error) {
 	checker := "./" + checkerRelative
 
-	machineArgs := []string{"--json", "--keys", emitKeysDir, emitArtifactDir}
-	machineStdout, machineStderr, machineExit, err := runChecker(packageDir, checker, machineArgs)
+	arguments := []string{"--json", "--keys", emitKeysDir, emitArtifactDir}
+	stdout, stderr, exitStatus, err := runChecker(packageDir, checker, arguments)
 	if err != nil {
 		return emitEvaluation{}, err
 	}
 	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
 		return emitEvaluation{}, err
-	}
-
-	humanArgs := []string{"--keys", emitKeysDir, emitArtifactDir}
-	humanStdout, _, humanExit, err := runChecker(packageDir, checker, humanArgs)
-	if err != nil {
-		return emitEvaluation{}, err
-	}
-	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
-		return emitEvaluation{}, err
-	}
-	if machineExit != humanExit {
-		return emitEvaluation{}, fmt.Errorf(
-			"checker is not reproducible: exit status %d with %v but %d with %v",
-			machineExit, machineArgs, humanExit, humanArgs)
 	}
 
 	writes := []struct {
 		path string
 		data []byte
 	}{
-		{emitMachineOutput, machineStdout},
-		{emitStdoutPath, humanStdout},
-		{emitStderrPath, machineStderr},
+		{emitMachineOutput, stdout},
+		{emitStderrPath, stderr},
 	}
 	for _, write := range writes {
 		full := filepath.Join(packageDir, filepath.FromSlash(write.path))
@@ -393,7 +384,7 @@ func runEmitEvaluation(packageDir, checkerRelative string, inputs []PackageBlob)
 		}
 	}
 
-	return emitEvaluation{arguments: machineArgs, exitStatus: machineExit, machineOutput: machineStdout, stderr: machineStderr}, nil
+	return emitEvaluation{arguments: arguments, exitStatus: exitStatus, machineOutput: stdout, stderr: stderr}, nil
 }
 
 // runChecker runs one checker invocation. A nonzero exit is a result, not an
@@ -409,8 +400,8 @@ func runChecker(dir, checker string, args []string) (stdout, stderr []byte, exit
 	stdout = []byte(outBuffer.String())
 	stderr = []byte(errBuffer.String())
 	if runErr != nil {
-		exitError, ok := runErr.(*exec.ExitError)
-		if !ok {
+		var exitError *exec.ExitError
+		if !errors.As(runErr, &exitError) {
 			return nil, nil, 0, fmt.Errorf("run checker %v: %w", args, runErr)
 		}
 		return stdout, stderr, exitError.ExitCode(), nil

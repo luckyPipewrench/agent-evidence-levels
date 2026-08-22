@@ -17,6 +17,12 @@ import (
 
 // runEmit builds a signed evaluation package from a real checker run.
 //
+// Custody and coverage arrive as flags with no defaults because they are
+// declarations the operator makes and then signs. Hardcoding them had the
+// command assert things on the operator's behalf, including a disclosure claim
+// no command can observe. validateEmitOptions refuses them empty, so a missing
+// declaration stops the emit rather than being filled in.
+//
 // There is no --kind flag. A verification record must be signed by a verifier
 // the validator rejects when their identity matches the producer or operator,
 // and the party running this command is the operator, so the only record this
@@ -41,6 +47,12 @@ func runEmit(arguments []string) int {
 	conformanceResult := flags.String("conformance-result", "", "result file from the conformance run")
 	conformanceCommand := flags.String("conformance-command", "", "conformance command, space separated")
 	conformanceExit := flags.Int("conformance-exit", 0, "exit status of the conformance run")
+	custodyAcquisition := flags.String("custody-acquisition", "", "operator declaration: how the artifact was acquired")
+	custodyReplay := flags.String("custody-replay", "", "operator declaration: replay availability")
+	custodyReview := flags.String("custody-review", "", "operator declaration: review performed")
+	custodyIssuance := flags.String("custody-issuance", "", "operator declaration: issuance basis")
+	coverageScope := flags.String("coverage-scope", "", "operator declaration: evidence scope")
+	coverageDisclosure := flags.String("coverage-disclosure", "", "operator declaration: disclosure completeness")
 	packageID := flags.String("id", "", "package identifier")
 	run := flags.String("run", "", "run to package; default is the first discovered run")
 	issuedAt := flags.String("issued-at", "", "RFC3339 issue time; default is now")
@@ -75,19 +87,27 @@ func runEmit(arguments []string) int {
 	command := strings.Fields(*conformanceCommand)
 
 	result, err := ael.EmitEvaluationPackage(ael.EmitOptions{
-		ArtifactDir:           *artifact,
-		ArtifactKeysDir:       *artifactKeys,
-		CheckerPath:           *checker,
-		CheckerName:           *checkerName,
-		SourceRevision:        *sourceRevision,
-		PackageID:             *packageID,
-		ProducerID:            *producerID,
-		OperatorID:            *operatorID,
-		OperatorKey:           operatorPrivate,
-		StatusAuthorityID:     *statusAuthorityID,
-		StatusPublicKey:       statusPublic,
-		Custody:               ael.PackageCustody{Acquisition: "declared", Replay: "available", Review: "declared", Issuance: "signed"},
-		Coverage:              ael.PackageCoverage{Scope: "declared", Disclosure: "complete-package"},
+		ArtifactDir:       *artifact,
+		ArtifactKeysDir:   *artifactKeys,
+		CheckerPath:       *checker,
+		CheckerName:       *checkerName,
+		SourceRevision:    *sourceRevision,
+		PackageID:         *packageID,
+		ProducerID:        *producerID,
+		OperatorID:        *operatorID,
+		OperatorKey:       operatorPrivate,
+		StatusAuthorityID: *statusAuthorityID,
+		StatusPublicKey:   statusPublic,
+		Custody: ael.PackageCustody{
+			Acquisition: *custodyAcquisition,
+			Replay:      *custodyReplay,
+			Review:      *custodyReview,
+			Issuance:    *custodyIssuance,
+		},
+		Coverage: ael.PackageCoverage{
+			Scope:      *coverageScope,
+			Disclosure: *coverageDisclosure,
+		},
 		SpecVersion:           *specVersion,
 		SpecPath:              *specPath,
 		CorpusVersion:         *corpusVersion,
