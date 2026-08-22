@@ -481,38 +481,57 @@ func TestEmitReportsCheckerDiagnosis(t *testing.T) {
 // emitted manifest names the executable that actually produced the result. A
 // checker that rewrites itself after its machine-readable run would otherwise
 // leave a valid package whose captured result came from different bytes than
-// its signed checker blob.
-func TestEmitRefusesCheckerThatMutatesPackageInput(t *testing.T) {
+// TestCheckerCannotReachThePackage replaces a test that asserted the emitter
+// DETECTED a checker mutating the package. Detection was the wrong property to
+// hold: it is a race by construction, and every round spent closing one window
+// opened another. The checker now runs against a disposable replica, so the
+// assertion is the stronger one, that the package is unaffected.
+func TestCheckerCannotReachThePackage(t *testing.T) {
 	harness := newEmitHarness(t, "ael1/valid")
-	checker := filepath.Join(t.TempDir(), "self-mutating-checker")
-	const script = `#!/bin/sh
-if [ "$1" = "--json" ]; then
-  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
-  cat > "$0" <<'EOF'
-#!/bin/sh
-if [ "$1" = "--json" ]; then
-  printf '{"runs":[{"run":"run-ael1-valid","changed":true}]}\n'
-else
-  printf 'changed checker\n'
-fi
-EOF
-  chmod 755 "$0"
-else
-  printf 'original checker\n'
-fi
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	// A checker that overwrites everything it can reach, then reports normally.
+	vandal := filepath.Join(t.TempDir(), "vandal-checker")
+	script := `#!/bin/sh
+printf 'TAMPERED\n' > artifact/manifest.json
+printf 'TAMPERED\n' > results/conformance.json 2>/dev/null
+printf 'TAMPERED\n' > inputs/specification.txt 2>/dev/null
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
 `
-	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(vandal, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	harness.options.CheckerPath = checker
+	harness.options.CheckerPath = vandal
 
-	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
-		t.Fatal("emit accepted a checker that changed after producing its report")
-	} else if indexOf(err.Error(), "changed package input") < 0 {
-		t.Errorf("emit rejected the checker for the wrong reason: %v", err)
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
 	}
-	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
-		t.Errorf("failed emit left a partial package behind: %v", err)
+
+	// Everything the checker tried to overwrite still holds the emitter's bytes.
+	for _, unchanged := range []struct {
+		path      string
+		forbidden string
+	}{
+		{filepath.Join("artifact", "manifest.json"), "TAMPERED"},
+		{filepath.Join("results", "conformance.json"), "TAMPERED"},
+		{filepath.Join("inputs", "specification.txt"), "TAMPERED"},
+	} {
+		raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, unchanged.path))
+		if err != nil {
+			t.Fatalf("read %s: %v", unchanged.path, err)
+		}
+		if indexOf(string(raw), unchanged.forbidden) >= 0 {
+			t.Errorf("%s carries bytes the checker wrote: %q", unchanged.path, raw)
+		}
+	}
+
+	// And the package still validates, so the replica did not cost integrity.
+	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if validation.DisplayState != "EVALUATED" {
+		t.Errorf("display state = %q, want EVALUATED", validation.DisplayState)
 	}
 }
 
@@ -825,15 +844,17 @@ func TestEmitRunsConformanceWithoutAShell(t *testing.T) {
 // it and is exempted from the mutation check. That same exemption was then
 // carried into the check that runs after the CHECKER, which had no business
 // touching the file at all, so the checker could replace the conformance
-// evidence and the replacement was digested and signed.
-func TestEmitRefusesCheckerThatRewritesConformanceEvidence(t *testing.T) {
+// TestConformanceEvidenceSurvivesAHostileChecker holds the property the whole
+// pull request exists for. The conformance result is the evidence a reader
+// trusts, and it was once the single file a later subprocess could rewrite and
+// have signed. The checker cannot reach it now.
+func TestConformanceEvidenceSurvivesAHostileChecker(t *testing.T) {
 	harness := newEmitHarness(t, "ael1/valid")
 	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
 
-	// A checker that overwrites the conformance result, then reports normally.
 	forging := filepath.Join(t.TempDir(), "forging-checker")
 	script := `#!/bin/sh
-printf '{"result":"FORGED"}\n' > results/conformance.json
+printf '{"result":"FORGED"}\n' > results/conformance.json 2>/dev/null
 printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
 `
 	if err := os.WriteFile(forging, []byte(script), 0o755); err != nil {
@@ -841,15 +862,18 @@ printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\
 	}
 	harness.options.CheckerPath = forging
 
-	_, err := ael.EmitEvaluationPackage(harness.options)
-	if err == nil {
-		t.Fatal("emit signed conformance evidence the checker rewrote")
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
 	}
-	// Assert the CHANGED case specifically. Merely naming the file also happens
-	// when the snapshot predates conformance and reports it as added, which is
-	// a different defect wearing the same filename in its message.
-	if indexOf(err.Error(), "changed package input") < 0 || indexOf(err.Error(), "conformance.json") < 0 {
-		t.Errorf("error does not report the conformance evidence as rewritten: %v", err)
+	packaged, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexOf(string(packaged), "FORGED") >= 0 {
+		t.Fatalf("the packaged conformance evidence is the checker's: %q", packaged)
+	}
+	if indexOf(string(packaged), `"result":"pass"`) < 0 {
+		t.Errorf("the packaged conformance evidence is not what the conformance run produced: %q", packaged)
 	}
 }
 

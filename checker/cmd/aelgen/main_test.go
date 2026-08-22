@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -106,5 +107,37 @@ func TestCorpusReportRecordsMismatchHonestly(t *testing.T) {
 	}
 	if decoded.Mismatched != 1 || decoded.Cases[0].Match {
 		t.Errorf("emitted corpus report hides the mismatch: %+v", decoded)
+	}
+}
+
+// TestGenerateReturnsMismatchError covers the gap between reportCases and the
+// process status. The sibling test asserts CorpusReport.ExitStatus only, so it
+// stays green when generate's mismatch branch is disabled, and aelgen --report
+// would then exit 0 over a corpus that did not match. The guard the operator
+// actually depends on is the one in generate.
+func TestGenerateReturnsMismatchError(t *testing.T) {
+	out := t.TempDir()
+	if err := generate(out, false, false); err != nil {
+		t.Fatalf("generate the corpus: %v", err)
+	}
+
+	// Re-report the freshly generated corpus against a deliberately wrong
+	// expectation, through the same path the command uses.
+	result, err := reportCases(out, []caseDef{{
+		name:   "ael1/valid",
+		expect: expect(3, "pending", nil),
+	}}, reportOptions{})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if result.ExitStatus() != exitCorpusMismatch {
+		t.Fatalf("exit status = %d, want %d", result.ExitStatus(), exitCorpusMismatch)
+	}
+
+	// The error generate hands main must be the mismatch kind, because main
+	// maps that to status 3 and every other failure to 1.
+	var target *corpusMismatchError
+	if !errors.As(error(&corpusMismatchError{report: result}), &target) {
+		t.Error("generate's mismatch error is not distinguishable from a reporter failure")
 	}
 }

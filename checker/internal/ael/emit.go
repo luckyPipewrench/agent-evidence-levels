@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -205,23 +206,28 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, err
 	}
 
-	// Re-snapshot now that conformance has written its result. The first
-	// snapshot predates that file, so it could only be carried forward as an
-	// exemption, and carrying the exemption into the checker's check left the
-	// conformance evidence as the one file a later subprocess could rewrite and
-	// have signed. From here nothing may change, that result included.
-	inputs, err = packageFileBlobs(packageDir)
+	// The checker runs against a DISPOSABLE REPLICA of the package, never the
+	// package itself.
+	//
+	// Running it in the staging directory and checking afterwards for changes
+	// is a losing shape: detection after the fact against a process holding
+	// write access is a race, and closing one window opens the next. The
+	// output limit applied only after execution, the group reap ran too late
+	// and then depended on a PID that can be reused, the mutation snapshot
+	// could be defeated by a symlink or a well-timed replacement, and a
+	// descendant outliving its parent could rewrite the evidence between the
+	// check and the signature. Every one of those is downstream of giving the
+	// subprocess something worth mutating.
+	//
+	// The replica has the same layout, so the recorded arguments stay relative
+	// and still replay verbatim inside the published package. The bytes that
+	// get digested and signed are the ones the emitter copied in, which no
+	// subprocess has ever been able to reach.
+	evaluation, err := runEmitEvaluationInReplica(packageDir, checkerRelative, options.CommandTimeout)
 	if err != nil {
 		return EmitResult{}, err
 	}
-
-	// The checker runs inside the package so its relative replay arguments are
-	// literal. The refreshed snapshot rejects any persistent mutation from that
-	// invocation: otherwise the manifest could digest a replacement binary,
-	// artifact, or conformance result rather than the bytes that produced its
-	// recorded outcome.
-	evaluation, err := runEmitEvaluation(packageDir, checkerRelative, inputs, options.CommandTimeout)
-	if err != nil {
+	if err := writeEvaluationResults(packageDir, evaluation); err != nil {
 		return EmitResult{}, err
 	}
 
@@ -386,36 +392,70 @@ type emitEvaluation struct {
 // the same bytes, so a disagreement means the evaluation is not reproducible,
 // and a package asserting one of two possible outcomes would be a false record.
 // Refusing is the honest direction even though it costs availability.
-func runEmitEvaluation(packageDir, checkerRelative string, inputs []PackageBlob, timeout time.Duration) (emitEvaluation, error) {
-	checker := "./" + checkerRelative
-
-	arguments := []string{"--json", "--keys", emitKeysDir, emitArtifactDir}
-	stdout, stderr, exitStatus, err := runChecker(packageDir, checker, arguments, timeout)
+func runEmitEvaluationInReplica(packageDir, checkerRelative string, timeout time.Duration) (emitEvaluation, error) {
+	replica, cleanup, err := replicateForEvaluation(packageDir, checkerRelative)
 	if err != nil {
 		return emitEvaluation{}, err
 	}
-	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
+	defer cleanup()
+
+	checker := "./" + checkerRelative
+	arguments := []string{"--json", "--keys", emitKeysDir, emitArtifactDir}
+	stdout, stderr, exitStatus, err := runChecker(replica, checker, arguments, timeout)
+	if err != nil {
 		return emitEvaluation{}, err
 	}
+	return emitEvaluation{arguments: arguments, exitStatus: exitStatus, machineOutput: stdout, stderr: stderr}, nil
+}
 
-	writes := []struct {
+// replicateForEvaluation copies the inputs the checker reads into a throwaway
+// directory laid out exactly like the package.
+//
+// Only what the recorded arguments name is copied: the artifact, the published
+// artifact keys, and the checker executable. The replica is removed afterwards,
+// so anything the checker or a descendant wrote there dies with it, and the
+// package keeps the bytes the emitter put in it.
+func replicateForEvaluation(packageDir, checkerRelative string) (string, func(), error) {
+	replica, err := os.MkdirTemp("", "ael-emit-replica-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create evaluation replica: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(replica) }
+
+	for _, relative := range []string{emitArtifactDir, emitKeysDir} {
+		source := filepath.Join(packageDir, filepath.FromSlash(relative))
+		if err := copyTree(source, filepath.Join(replica, filepath.FromSlash(relative))); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("replicate %s: %w", relative, err)
+		}
+	}
+	source := filepath.Join(packageDir, filepath.FromSlash(checkerRelative))
+	if err := copyFile(source, filepath.Join(replica, filepath.FromSlash(checkerRelative)), 0o755); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("replicate checker: %w", err)
+	}
+	return replica, cleanup, nil
+}
+
+// writeEvaluationResults records the captured streams into the package. The
+// emitter writes them; the checker never had a handle on this directory.
+func writeEvaluationResults(packageDir string, evaluation emitEvaluation) error {
+	for _, write := range []struct {
 		path string
 		data []byte
 	}{
-		{emitMachineOutput, stdout},
-		{emitStderrPath, stderr},
-	}
-	for _, write := range writes {
+		{emitMachineOutput, evaluation.machineOutput},
+		{emitStderrPath, evaluation.stderr},
+	} {
 		full := filepath.Join(packageDir, filepath.FromSlash(write.path))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return emitEvaluation{}, err
+			return err
 		}
 		if err := os.WriteFile(full, write.data, 0o644); err != nil {
-			return emitEvaluation{}, fmt.Errorf("write %s: %w", write.path, err)
+			return fmt.Errorf("write %s: %w", write.path, err)
 		}
 	}
-
-	return emitEvaluation{arguments: arguments, exitStatus: exitStatus, machineOutput: stdout, stderr: stderr}, nil
+	return nil
 }
 
 // Output and time limits for every subprocess the emitter runs. Both the
@@ -463,6 +503,23 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 	}
 	defer cleanup()
 
+	// A watchdog enforces the size limit while the command runs.
+	//
+	// The obvious shape, wrapping each file in a limiting io.Writer, is wrong
+	// here and the reason is easy to miss: exec only passes an *os.File
+	// through to the child directly. Any other writer makes it create a PIPE
+	// and copy, and a descendant holding that pipe is precisely what delays Run
+	// past the point where the process group is reaped. Handing exec the real
+	// files keeps Run tied to the direct child, so the size is bounded from
+	// outside instead.
+	limits := &subprocessLimits{
+		files:  []*os.File{outFile, errFile},
+		limits: []int64{maxSubprocessStdout, maxSubprocessStderr},
+		stop:   cancel,
+	}
+	watchdogDone := limits.watch()
+	defer func() { <-watchdogDone }()
+
 	command := exec.CommandContext(ctx, checker, args...)
 	command.Dir = dir
 	boundSubprocessLifetime(command)
@@ -471,21 +528,24 @@ func runChecker(dir, checker string, args []string, timeout time.Duration) (stdo
 
 	runErr := command.Run()
 	reapSubprocessGroup(command)
+	limits.halt()
 
-	stdout, stdoutExceeded, err := readBoundedFile(outFile, maxSubprocessStdout)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	stderr, stderrExceeded, err := readBoundedFile(errFile, maxSubprocessStderr)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	if stdoutExceeded || stderrExceeded {
+	// The overflow check comes first on purpose. Exceeding the limit cancels the
+	// context, so the deadline error would otherwise mask the real reason.
+	if limits.exceeded() {
 		return nil, nil, 0, fmt.Errorf("command %s %v produced more output than the emitter accepts (stdout limit %d, stderr limit %d)",
 			checker, args, maxSubprocessStdout, maxSubprocessStderr)
 	}
 	if ctx.Err() != nil {
 		return nil, nil, 0, fmt.Errorf("command %s %v did not finish within %s", checker, args, timeout)
+	}
+	stdout, err = readCapturedFile(outFile)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	stderr, err = readCapturedFile(errFile)
+	if err != nil {
+		return nil, nil, 0, err
 	}
 	if runErr != nil {
 		var exitError *exec.ExitError
@@ -518,30 +578,85 @@ func subprocessOutputFiles() (out, errOut *os.File, cleanup func(), err error) {
 	}, nil
 }
 
-// readBoundedFile reads a capture file and reports whether it exceeded the
-// limit. The size is checked before reading so an oversized capture is never
-// pulled into memory to discover it was oversized.
+// subprocessLimits caps how much a running subprocess may write.
 //
-// An over-limit capture is refused rather than truncated. Truncation is the
-// worse failure here: a clipped conformance report can still parse, so the
-// package would carry evidence that reads as complete while describing a
-// partial run.
-func readBoundedFile(file *os.File, limit int64) ([]byte, bool, error) {
-	info, err := file.Stat()
-	if err != nil {
-		return nil, false, fmt.Errorf("stat subprocess output: %w", err)
+// It polls the capture files and ends the run when either passes its limit.
+// Discarding the overflow without ending the run would bound the disk and leave
+// the clock unbounded: a flooding command would keep going to the full deadline
+// with its output thrown away.
+//
+// It refuses rather than truncating. Truncation is the worse failure here: a
+// clipped conformance report can still parse, so the package would carry
+// evidence that reads as complete while describing a partial run.
+type subprocessLimits struct {
+	files  []*os.File
+	limits []int64
+	stop   func()
+	over   atomic.Bool
+	done   chan struct{}
+}
+
+func (l *subprocessLimits) watch() <-chan struct{} {
+	finished := make(chan struct{})
+	l.done = make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(subprocessSizePollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-l.done:
+				return
+			case <-ticker.C:
+				if l.overLimit() {
+					l.over.Store(true)
+					l.stop()
+					return
+				}
+			}
+		}
+	}()
+	return finished
+}
+
+func (l *subprocessLimits) overLimit() bool {
+	for index, file := range l.files {
+		info, err := file.Stat()
+		if err != nil {
+			continue
+		}
+		if info.Size() > l.limits[index] {
+			return true
+		}
 	}
-	if info.Size() > limit {
-		return nil, true, nil
+	return false
+}
+
+// halt stops the watchdog and takes a final reading, so output written between
+// the last poll and the command exiting is still caught.
+func (l *subprocessLimits) halt() {
+	close(l.done)
+	if l.overLimit() {
+		l.over.Store(true)
 	}
+}
+
+func (l *subprocessLimits) exceeded() bool { return l.over.Load() }
+
+// subprocessSizePollInterval bounds how much a flooding command can write past
+// its limit before the watchdog notices.
+const subprocessSizePollInterval = 50 * time.Millisecond
+
+// readCapturedFile reads a capture whose size the writer already bounded.
+func readCapturedFile(file *os.File) ([]byte, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("rewind subprocess output: %w", err)
+		return nil, fmt.Errorf("rewind subprocess output: %w", err)
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, limit))
+	raw, err := io.ReadAll(file)
 	if err != nil {
-		return nil, false, fmt.Errorf("read subprocess output: %w", err)
+		return nil, fmt.Errorf("read subprocess output: %w", err)
 	}
-	return raw, false, nil
+	return raw, nil
 }
 
 // validateEmitPaths refuses an output directory that overlaps an input.

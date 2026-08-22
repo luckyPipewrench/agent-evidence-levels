@@ -15,9 +15,11 @@ func boundSubprocessLifetime(command *exec.Cmd) {
 
 // reapSubprocessGroup cannot signal a group on this platform.
 //
-// Stated rather than silently skipped: where process groups are unavailable a
-// descendant that outlives its parent is not terminated here, so the mutation
-// check is the thing standing between such a descendant and a signed package
-// rather than a second line behind this one. The deadline still holds, because
-// WaitDelay stops Run waiting on an inherited pipe.
+// This is resource hygiene, not integrity, and the distinction matters because
+// the earlier design made it load-bearing. The checker now runs against a
+// disposable replica and the emitter writes every packaged byte itself, so a
+// descendant that outlives its parent has nothing in the signed package to
+// reach whether it is terminated or not. What is lost here is the tidy-up: such
+// a descendant may keep running and consuming resources until the operator
+// notices it.
 func reapSubprocessGroup(command *exec.Cmd) {}

@@ -44,7 +44,8 @@ func runEmit(arguments []string) int {
 	specVersion := flags.String("spec-version", "", "specification version")
 	corpusDigestSource := flags.String("corpus-digest-source", "", "file whose digest identifies the conformance corpus")
 	corpusVersion := flags.String("corpus-version", "", "conformance corpus version")
-	conformanceCommand := flags.String("conformance-command", "", "conformance command to RUN, space separated")
+	var conformanceCommand argvList
+	flags.Var(&conformanceCommand, "conformance-command", "conformance command to RUN; repeat once per argv element")
 	conformanceDir := flags.String("conformance-dir", "", "directory to run the conformance command in; default is the current directory")
 	custodyAcquisition := flags.String("custody-acquisition", "", "operator declaration: how the artifact was acquired")
 	custodyReplay := flags.String("custody-replay", "", "operator declaration: replay availability")
@@ -87,7 +88,7 @@ func runEmit(arguments []string) int {
 		issued = parsed
 	}
 
-	command := strings.Fields(*conformanceCommand)
+	command := []string(conformanceCommand)
 
 	result, err := ael.EmitEvaluationPackage(ael.EmitOptions{
 		ArtifactDir:       *artifact,
@@ -154,6 +155,23 @@ func runEmit(arguments []string) int {
 // exitEmittedNonconforming means the package was written and the artifact did
 // not conform. It is distinct from 1, which means no package exists.
 const exitEmittedNonconforming = 3
+
+// argvList collects one argv element per flag occurrence.
+//
+// Splitting a single string on whitespace could not express an element
+// containing a space, so a checker or suite under a path like
+// "/opt/my suite/run.sh" broke apart into two arguments and exec failed naming
+// only the first half. There is no quoting to add here, because the emitter
+// passes the vector straight to exec with no shell; the flag simply has to be
+// able to say what the vector is.
+type argvList []string
+
+func (l *argvList) String() string { return strings.Join(*l, " ") }
+
+func (l *argvList) Set(value string) error {
+	*l = append(*l, value)
+	return nil
+}
 
 // exitReportFailed means the package was written and published but its result
 // could not be reported. It is distinct from 1, which means no package exists,

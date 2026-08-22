@@ -2629,8 +2629,13 @@ func reportCases(root string, cases []caseDef, options reportOptions) (CorpusRep
 		}
 
 		if !options.JSON {
-			_, _ = fmt.Fprintf(out, "%s: %s expected: %s [%s]\n",
-				c.name, reportSummary(report), reportExpected(c.expect), okLabel(ok))
+			// A failed write is a reporter failure, not a corpus verdict.
+			// Discarding it let a broken output stream present as either a
+			// clean corpus or a mismatching one, depending on nothing.
+			if _, err := fmt.Fprintf(out, "%s: %s expected: %s [%s]\n",
+				c.name, reportSummary(report), reportExpected(c.expect), okLabel(ok)); err != nil {
+				return CorpusReport{}, fmt.Errorf("write corpus report: %w", err)
+			}
 		}
 	}
 

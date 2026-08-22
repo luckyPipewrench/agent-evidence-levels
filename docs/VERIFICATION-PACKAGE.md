@@ -57,9 +57,17 @@ argv vector with no shell, so metacharacters reach the program as literal argume
 arrives only as an operator flag and is never read from the artifact, the package, or any file the
 evaluated subject can write. It runs beside the checker executable the operator also supplies, so
 an operator who can choose what the emitter executes could already execute anything as themselves.
-Every subprocess the emitter runs is bounded: output is capped, a deadline applies, the process
-group is signalled on cancellation so a wrapper cannot leave a child holding the pipe, and a run
-that changes any packaged input is refused before signing.
+The checker never runs against the package it is being packaged into. It runs against a disposable
+replica laid out identically, so its recorded arguments still replay verbatim inside the published
+package, while every byte that gets digested and signed is one the emitter wrote and no subprocess
+could reach. Detecting tampering afterwards was the earlier design and it was the wrong shape: a
+check racing a process that holds write access closes one window and opens the next.
+
+Every subprocess is bounded independently of that: output is capped while it is being written and
+exceeding the cap ends the run, a deadline applies, and on platforms with process groups the group
+is signalled so a wrapper cannot leave a child behind. Where process groups are unavailable that
+last part is resource hygiene rather than integrity, because a surviving descendant has nothing in
+the signed package to reach.
 
 The custody and coverage flags are declarations the operator makes and then signs, so they have no
 defaults and the command refuses to run without them. A disclosure claim in particular is something
