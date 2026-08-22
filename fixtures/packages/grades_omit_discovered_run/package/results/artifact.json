@@ -105,7 +105,7 @@
       "coverage": "enforced-total",
       "custody": "same-operator",
       "anchor": "none",
-      "retention": "30d/fixture",
+      "retention": "operator-declared 30d/fixture",
       "open": false,
       "notes": [
         "AEL-3 capped: check n is UV (manifest anchor block is absent)"
@@ -216,7 +216,7 @@
       "coverage": "enforced-total",
       "custody": "same-operator",
       "anchor": "none",
-      "retention": "30d/fixture",
+      "retention": "operator-declared 30d/fixture",
       "open": true,
       "open_status": "OPEN/ABNORMAL-END",
       "notes": [
