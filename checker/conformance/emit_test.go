@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,8 +82,9 @@ func newEmitHarness(t *testing.T, artifactCase string) emitHarness {
 	if err := os.WriteFile(corpusPath, []byte("corpus identity\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	conformancePath := filepath.Join(root, "conformance.json")
-	if err := os.WriteFile(conformancePath, []byte("{\"result\":\"pass\"}\n"), 0o644); err != nil {
+	// The conformance command is run now, so the harness supplies a real one.
+	conformancePath := filepath.Join(root, "conformance.sh")
+	if err := os.WriteFile(conformancePath, []byte("#!/bin/sh\nprintf '{\"result\":\"pass\"}\\n'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,28 +97,26 @@ func newEmitHarness(t *testing.T, artifactCase string) emitHarness {
 	return emitHarness{
 		trustRoot: trustRoot,
 		options: ael.EmitOptions{
-			ArtifactDir:           artifact,
-			ArtifactKeysDir:       filepath.Join(artifact, "keys"),
-			CheckerPath:           buildChecker(t),
-			CheckerName:           "aelcheck",
-			SourceRevision:        "test-revision",
-			PackageID:             "emitted-" + filepath.Base(artifactCase),
-			ProducerID:            "test-producer",
-			OperatorID:            "test-operator",
-			OperatorKey:           operatorPriv,
-			StatusAuthorityID:     "test-status-authority",
-			StatusPublicKey:       statusPub,
-			Custody:               ael.PackageCustody{Acquisition: "declared", Replay: "available", Review: "declared", Issuance: "signed"},
-			Coverage:              ael.PackageCoverage{Scope: "declared", Disclosure: "complete-package"},
-			SpecVersion:           "0.1",
-			SpecPath:              specPath,
-			CorpusVersion:         "test-corpus",
-			CorpusDigestPath:      corpusPath,
-			ConformanceCommand:    []string{"make", "check"},
-			ConformanceResultPath: conformancePath,
-			ConformanceExitStatus: 0,
-			IssuedAt:              issued,
-			OutDir:                filepath.Join(root, "package"),
+			ArtifactDir:        artifact,
+			ArtifactKeysDir:    filepath.Join(artifact, "keys"),
+			CheckerPath:        buildChecker(t),
+			CheckerName:        "aelcheck",
+			SourceRevision:     "test-revision",
+			PackageID:          "emitted-" + filepath.Base(artifactCase),
+			ProducerID:         "test-producer",
+			OperatorID:         "test-operator",
+			OperatorKey:        operatorPriv,
+			StatusAuthorityID:  "test-status-authority",
+			StatusPublicKey:    statusPub,
+			Custody:            ael.PackageCustody{Acquisition: "declared", Replay: "available", Review: "declared", Issuance: "signed"},
+			Coverage:           ael.PackageCoverage{Scope: "declared", Disclosure: "complete-package"},
+			SpecVersion:        "0.1",
+			SpecPath:           specPath,
+			CorpusVersion:      "test-corpus",
+			CorpusDigestPath:   corpusPath,
+			ConformanceCommand: []string{conformancePath},
+			IssuedAt:           issued,
+			OutDir:             filepath.Join(root, "package"),
 		},
 	}
 }
@@ -477,42 +478,177 @@ func TestEmitReportsCheckerDiagnosis(t *testing.T) {
 	}
 }
 
-// TestEmitRefusesCheckerThatMutatesPackageInput proves the digest in the
-// emitted manifest names the executable that actually produced the result. A
-// checker that rewrites itself after its machine-readable run would otherwise
-// leave a valid package whose captured result came from different bytes than
-// its signed checker blob.
-func TestEmitRefusesCheckerThatMutatesPackageInput(t *testing.T) {
+// TestCheckerCannotReachThePackage replaces a test that asserted the emitter
+// DETECTED a checker mutating the package. Detection was the wrong property to
+// hold: it is a race by construction, and every round spent closing one window
+// opened another. The checker now runs against a disposable replica, so the
+// assertion is the stronger one, that the package is unaffected.
+func TestCheckerCannotReachThePackage(t *testing.T) {
 	harness := newEmitHarness(t, "ael1/valid")
-	checker := filepath.Join(t.TempDir(), "self-mutating-checker")
-	const script = `#!/bin/sh
-if [ "$1" = "--json" ]; then
-  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
-  cat > "$0" <<'EOF'
-#!/bin/sh
-if [ "$1" = "--json" ]; then
-  printf '{"runs":[{"run":"run-ael1-valid","changed":true}]}\n'
-else
-  printf 'changed checker\n'
-fi
-EOF
-  chmod 755 "$0"
-else
-  printf 'original checker\n'
-fi
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	// A checker that overwrites both paths it can reach, then reports normally.
+	// set -e and the marker prove those writes succeeded in the replica rather
+	// than this test passing because the paths were absent.
+	marker := filepath.Join(t.TempDir(), "vandal-ran")
+	vandal := filepath.Join(t.TempDir(), "vandal-checker")
+	script := `#!/bin/sh
+set -e
+printf 'TAMPERED\n' > artifact/manifest.json
+printf 'TAMPERED\n' > inputs/specification.txt
+: > "$AEL_EMIT_TEST_VANDAL_RAN"
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
+`
+	if err := os.WriteFile(vandal, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEL_EMIT_TEST_VANDAL_RAN", marker)
+	harness.options.CheckerPath = vandal
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("vandal did not prove writes inside the replica: %v", err)
+	}
+
+	// Everything the checker tried to overwrite still holds the emitter's bytes.
+	for _, unchanged := range []struct {
+		path      string
+		forbidden string
+	}{
+		{filepath.Join("artifact", "manifest.json"), "TAMPERED"},
+		{filepath.Join("inputs", "specification.txt"), "TAMPERED"},
+	} {
+		raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, unchanged.path))
+		if err != nil {
+			t.Fatalf("read %s: %v", unchanged.path, err)
+		}
+		if indexOf(string(raw), unchanged.forbidden) >= 0 {
+			t.Errorf("%s carries bytes the checker wrote: %q", unchanged.path, raw)
+		}
+	}
+
+	// And the package still validates, so the replica did not cost integrity.
+	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if validation.DisplayState != "EVALUATED" {
+		t.Errorf("display state = %q, want EVALUATED", validation.DisplayState)
+	}
+}
+
+// TestEmitRefusesPackageInputChangedAfterReplica attacks the redesign's new
+// trust boundary. The checker receives a disposable replica, but a descendant
+// that escapes its process group can still discover the private staging path
+// under the same user. It changes the staged artifact only after the replica
+// exists, so the checker evaluates the original bytes while the manifest would
+// otherwise sign the changed ones.
+func TestEmitRefusesPackageInputChangedAfterReplica(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setsid is unavailable on Windows")
+	}
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is required to escape the emitter process group")
+	}
+
+	harness := newEmitHarness(t, "ael1/valid")
+	marker := filepath.Join(t.TempDir(), "replica-ready")
+	checker := filepath.Join(t.TempDir(), "escaping-checker")
+	parent := filepath.Dir(harness.options.OutDir)
+	base := filepath.Base(harness.options.OutDir)
+	script := `#!/bin/sh
+setsid sh -c '
+  while [ ! -e "$AEL_EMIT_TEST_REPLICA_READY" ]; do sleep 0.01; done
+  for stage in "$AEL_EMIT_TEST_STAGE_PARENT"/."$AEL_EMIT_TEST_STAGE_BASE".aelpackage-*; do
+    if [ -f "$stage/artifact/recorders/r1.jsonl" ]; then
+      printf "x" >> "$stage/artifact/recorders/r1.jsonl"
+      exit 0
+    fi
+  done
+' >/dev/null 2>&1 &
+: > "$AEL_EMIT_TEST_REPLICA_READY"
+sleep 1
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
 `
 	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("AEL_EMIT_TEST_REPLICA_READY", marker)
+	t.Setenv("AEL_EMIT_TEST_STAGE_PARENT", parent)
+	t.Setenv("AEL_EMIT_TEST_STAGE_BASE", base)
 	harness.options.CheckerPath = checker
 
-	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
-		t.Fatal("emit accepted a checker that changed after producing its report")
-	} else if indexOf(err.Error(), "checker changed package input") < 0 {
-		t.Errorf("emit rejected the checker for the wrong reason: %v", err)
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted package bytes that differ from the replica the checker evaluated")
 	}
-	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
-		t.Errorf("failed emit left a partial package behind: %v", err)
+	if !strings.Contains(err.Error(), "changed package input") {
+		t.Errorf("error does not name the changed package input: %v", err)
+	}
+	if _, statErr := os.Stat(harness.options.OutDir); !os.IsNotExist(statErr) {
+		t.Errorf("a refused emit published a package: %v", statErr)
+	}
+}
+
+// TestEmitRefusesConformanceEvidenceChangedAfterRun covers a descendant of the
+// conformance command that escapes the process group. The checker cannot reach
+// the package, but this earlier subprocess can wait until the emitter writes
+// its captured conformance result, then replace that result before signing.
+func TestEmitRefusesConformanceEvidenceChangedAfterRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setsid is unavailable on Windows")
+	}
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is required to escape the emitter process group")
+	}
+
+	harness := newEmitHarness(t, "ael1/valid")
+	marker := filepath.Join(t.TempDir(), "checker-started")
+	descendantReady := filepath.Join(t.TempDir(), "conformance-descendant-ready")
+	parent := filepath.Dir(harness.options.OutDir)
+	base := filepath.Base(harness.options.OutDir)
+	conformance := filepath.Join(t.TempDir(), "escaping-conformance")
+	conformanceScript := `#!/bin/sh
+setsid sh -c '
+  : > "$AEL_EMIT_TEST_CONFORMANCE_DESCENDANT_READY"
+  while [ ! -e "$AEL_EMIT_TEST_CHECKER_STARTED" ]; do sleep 0.01; done
+  for stage in "$AEL_EMIT_TEST_STAGE_PARENT"/."$AEL_EMIT_TEST_STAGE_BASE".aelpackage-*; do
+    if [ -f "$stage/results/conformance.json" ]; then
+      printf "{\"result\":\"FORGED\"}\n" > "$stage/results/conformance.json"
+      exit 0
+    fi
+  done
+' >/dev/null 2>&1 &
+while [ ! -e "$AEL_EMIT_TEST_CONFORMANCE_DESCENDANT_READY" ]; do sleep 0.01; done
+printf '{"result":"pass"}\n'
+`
+	if err := os.WriteFile(conformance, []byte(conformanceScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(t.TempDir(), "marker-checker")
+	checkerScript := `#!/bin/sh
+: > "$AEL_EMIT_TEST_CHECKER_STARTED"
+sleep 1
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
+`
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEL_EMIT_TEST_CHECKER_STARTED", marker)
+	t.Setenv("AEL_EMIT_TEST_CONFORMANCE_DESCENDANT_READY", descendantReady)
+	t.Setenv("AEL_EMIT_TEST_STAGE_PARENT", parent)
+	t.Setenv("AEL_EMIT_TEST_STAGE_BASE", base)
+	harness.options.ConformanceCommand = []string{conformance}
+	harness.options.CheckerPath = checker
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted conformance evidence changed after the observed run")
+	}
+	if !strings.Contains(err.Error(), "changed package input") {
+		t.Errorf("error does not name the changed conformance evidence: %v", err)
 	}
 }
 
@@ -565,6 +701,39 @@ fi
 	wantCorpusDigest := hex.EncodeToString(corpusSum[:])
 	if manifest.Conformance.Corpus.Digest != wantCorpusDigest {
 		t.Errorf("corpus digest = %s, want pre-execution digest %s", manifest.Conformance.Corpus.Digest, wantCorpusDigest)
+	}
+}
+
+// TestEmitBindsCorpusIdentityAfterConformance holds the conformance-side
+// version of the replica invariant. aelgen materializes the corpus before it
+// reports over that material, so the package must bind the corpus identity
+// after the command completes, not a stale source from before it ran.
+func TestEmitBindsCorpusIdentityAfterConformance(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	const corpusAfter = "corpus after conformance\n"
+	command := filepath.Join(t.TempDir(), "regenerating-conformance.sh")
+	script := "#!/bin/sh\nprintf '" + corpusAfter + "' > \"$AEL_EMIT_TEST_CORPUS\"\nprintf '{\"result\":\"pass\"}\\n'\n"
+	if err := os.WriteFile(command, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEL_EMIT_TEST_CORPUS", harness.options.CorpusDigestPath)
+	harness.options.ConformanceCommand = []string{command}
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ael.PackageManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(corpusAfter))
+	want := hex.EncodeToString(sum[:])
+	if manifest.Conformance.Corpus.Digest != want {
+		t.Errorf("corpus digest = %s, want digest after conformance %s", manifest.Conformance.Corpus.Digest, want)
 	}
 }
 
@@ -631,4 +800,260 @@ func digestFile(path string) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// writeConformanceCommand creates a script standing in for a real conformance
+// run: it writes a result blob to stdout and exits with the given status.
+func writeConformanceCommand(t *testing.T, verdict string, exitStatus int) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "conformance.sh")
+	body := "#!/bin/sh\n" +
+		"printf '{\"result\":\"" + verdict + "\"}\\n'\n" +
+		"exit " + strconv.Itoa(exitStatus) + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestEmitObservesConformanceExitStatus is the fix for a contradiction the
+// declared form allowed: a package could carry a conformance blob reporting
+// failure alongside a declared exit of zero, and still validate as EVALUATED.
+// Running the command makes the blob and the status come from one process, so
+// they cannot disagree.
+func TestEmitObservesConformanceExitStatus(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "FAIL", 3)}
+
+	result, err := ael.EmitEvaluationPackage(harness.options)
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if result.ConformanceExitStatus != 3 {
+		t.Fatalf("conformance exit status = %d, want the observed 3", result.ConformanceExitStatus)
+	}
+
+	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if validation.DisplayState != "CONFORMANCE-FAILED" {
+		t.Errorf("display state = %q, want CONFORMANCE-FAILED", validation.DisplayState)
+	}
+}
+
+// TestEmitCapturesConformanceOutput holds that the packaged conformance
+// evidence is what the run produced, not a file the operator chose.
+func TestEmitCapturesConformanceOutput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexOf(string(raw), `"result":"pass"`) < 0 {
+		t.Errorf("packaged conformance result is not the command's output: %q", raw)
+	}
+}
+
+// TestEmitRefusesConformanceThatMutatesPackageInput holds the final static
+// input binding. The conformance command runs with the emitter's privileges,
+// so a buggy suite can reach the staging directory as easily as a hostile one.
+// The emitter may not sign any copied byte that differs from its pre-run
+// snapshot, even though the command itself never sees the final manifest.
+func TestEmitRefusesConformanceThatMutatesPackageInput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+
+	// A conformance command that reaches into the staging directory and
+	// rewrites a bundled input the checker does not read. Mutating the artifact
+	// manifest made the checker fail later, so this test passed without proving
+	// the final static input binding.
+	script := filepath.Join(t.TempDir(), "mutating-conformance.sh")
+	parent := filepath.Dir(harness.options.OutDir)
+	base := filepath.Base(harness.options.OutDir)
+	body := "#!/bin/sh\n" +
+		"for stage in " + parent + "/." + base + ".aelpackage-*; do\n" +
+		"  if [ -f \"$stage/inputs/specification.txt\" ]; then\n" +
+		"    printf 'mutated\\n' >> \"$stage/inputs/specification.txt\"\n" +
+		"  fi\n" +
+		"done\n" +
+		"printf '{\"result\":\"pass\"}\\n'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted a conformance command that rewrote a packaged input")
+	}
+	if indexOf(err.Error(), "changed package input") < 0 {
+		t.Errorf("error does not name the input mutation: %v", err)
+	}
+	if _, statErr := os.Stat(harness.options.OutDir); !os.IsNotExist(statErr) {
+		t.Errorf("a refused emit published a package: %v", statErr)
+	}
+}
+
+// TestEmitBoundsConformanceOutput holds the detection limit that stops
+// emission when a runaway conformance command floods the capture. The capture
+// becomes signed evidence, so it errors rather than truncating: a clipped
+// conformance report can still parse, and the package would then carry evidence
+// that reads as complete while describing a partial run.
+func TestEmitBoundsConformanceOutput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	script := filepath.Join(t.TempDir(), "flooding-conformance.sh")
+	// Emit far past the stdout ceiling.
+	body := "#!/bin/sh\nexec yes ael-flood\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted unbounded conformance output")
+	}
+	if indexOf(err.Error(), "more output than the emitter accepts") < 0 {
+		t.Errorf("error does not name the output limit: %v", err)
+	}
+}
+
+// TestEmitBoundsConformanceRuntime holds the deadline. A conformance process
+// that waits forever would otherwise block emission with no way out.
+func TestEmitBoundsConformanceRuntime(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	script := filepath.Join(t.TempDir(), "hanging-conformance.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 300\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+	harness.options.CommandTimeout = 2 * time.Second
+
+	start := time.Now()
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("emit accepted a conformance command that never finishes")
+	}
+	if elapsed > 60*time.Second {
+		t.Errorf("emit waited %v, so the deadline did not apply", elapsed)
+	}
+}
+
+// TestEmitRunsConformanceWithoutAShell records the trust boundary for executing
+// a conformance command, because "the emitter runs a command" invites the
+// reading that it is a shell-injection surface. It is not one.
+//
+// The command is passed as an argv vector to exec, with no shell between the
+// caller and the process, so metacharacters arrive at the program as literal
+// argument bytes rather than being interpreted. The command also reaches the
+// emitter only as an operator flag: it is never read from the artifact, the
+// package, or any file the evaluated subject can write.
+//
+// That leaves the operator, who already supplies the checker executable this
+// command runs beside. An operator who can choose what the emitter executes can
+// already execute anything as themselves, so refusing to run the conformance
+// command would remove no capability they lack, while reintroducing the
+// declared-conformance contradiction this package exists to close.
+func TestEmitRunsConformanceWithoutAShell(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "shell-probe-must-not-exist")
+	script := filepath.Join(t.TempDir(), "argv-conformance.sh")
+	body := "#!/bin/sh\nprintf '{\"result\":\"pass\",\"argument\":\"%s\"}\\n' \"$1\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// If any shell interpreted this, the substitution runs and the probe appears.
+	hostile := "$(touch " + probe + ")"
+
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{script, hostile}
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Fatalf("a shell interpreted the conformance argument and ran the substitution: %v", err)
+	}
+	packaged, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(packaged), hostile) {
+		t.Errorf("the argument did not reach the process literally: %q", packaged)
+	}
+}
+
+// TestConformanceEvidenceSurvivesAHostileChecker holds the property the whole
+// pull request exists for. The conformance result is the evidence a reader
+// trusts, and it was once the single file a later subprocess could rewrite and
+// have signed. The checker cannot reach it now.
+func TestConformanceEvidenceSurvivesAHostileChecker(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	forging := filepath.Join(t.TempDir(), "forging-checker")
+	script := `#!/bin/sh
+printf '{"result":"FORGED"}\n' > results/conformance.json 2>/dev/null
+printf '{"runs":[{"run":"run-ael1-valid","grade":1,"r":"pending","checks":{}}]}\n'
+`
+	if err := os.WriteFile(forging, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.CheckerPath = forging
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	packaged, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexOf(string(packaged), "FORGED") >= 0 {
+		t.Fatalf("the packaged conformance evidence is the checker's: %q", packaged)
+	}
+	if indexOf(string(packaged), `"result":"pass"`) < 0 {
+		t.Errorf("the packaged conformance evidence is not what the conformance run produced: %q", packaged)
+	}
+}
+
+// TestEmitLeavesNoMutatingDescendant covers a subprocess that exits cleanly and
+// leaves a child behind. The child reports that it started before its parent
+// returns, then waits for the test to release it. That removes the old
+// sleep-three-seconds / sleep-five-seconds race: with group reaping disabled,
+// a known-live child writes immediately after release; with it enabled, the
+// child is gone before release.
+func TestEmitLeavesNoMutatingDescendant(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "descendant-wrote-this")
+	ready := filepath.Join(t.TempDir(), "descendant-ready")
+	release := filepath.Join(t.TempDir(), "release-descendant")
+	spawning := filepath.Join(t.TempDir(), "spawning-conformance.sh")
+	script := "#!/bin/sh\n(printf 'ready' > " + ready + "; while [ ! -e " + release + " ]; do sleep 0.01; done; printf 'x' > " + probe + ") &\nwhile [ ! -e " + ready + " ]; do sleep 0.01; done\nprintf '{\"result\":\"pass\"}\\n'\n"
+	if err := os.WriteFile(spawning, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{spawning}
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(probe); err == nil {
+			t.Fatal("a descendant survived its parent's clean exit and kept writing")
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect descendant probe: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

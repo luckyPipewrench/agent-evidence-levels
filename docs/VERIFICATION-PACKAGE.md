@@ -40,13 +40,45 @@ make build
   --operator-key ./operator.key --operator-id my-operator --producer-id my-producer \
   --status-authority-id my-status-authority --status-key ./status.pub \
   --spec ./specification.txt --spec-version 0.1 \
-  --corpus-digest-source ./corpus-id.txt --corpus-version v1 \
-  --conformance-result ./conformance.json --conformance-command "make check" \
+  --corpus-digest-source ./fixtures/CASES.txt --corpus-version v1 \
+  --conformance-command=./bin/aelgen \
+  --conformance-command=--report \
+  --conformance-command=--json \
+  --conformance-command=--out \
+  --conformance-command=./fixtures \
   --custody-acquisition declared --custody-replay available \
   --custody-review declared --custody-issuance signed \
   --coverage-scope declared --coverage-disclosure complete-package \
   --id my-package-001 --out ./package
 ```
+
+The conformance command is run, not described. Its stdout becomes the packaged conformance result and its exit status becomes the recorded status, so the evidence and the verdict come from one process. Taking them as two declarations allowed a package to carry a result reporting failure alongside a declared exit of zero and still validate as `EVALUATED`.
+
+`aelgen --report --json` produces that result: a machine-readable corpus report on stdout, diagnostics on stderr, and status 3 when any case disagrees with its expectation.
+
+The emitter executes that command, so the trust boundary is worth stating plainly. It runs as an
+argv vector with no shell, so metacharacters reach the program as literal argument bytes. It
+arrives only as an operator flag and is never read from the artifact, the package, or any file the
+evaluated subject can write. It runs beside the checker executable the operator also supplies, so
+an operator who can choose what the emitter executes could already execute anything as themselves.
+The checker never runs against the package it is being packaged into. It runs against a disposable
+replica laid out identically, so its recorded arguments still replay verbatim inside the published
+package. Before signing, the emitter compares static package inputs with their pre-subprocess and
+replica snapshots, and compares the packaged conformance result with the direct command's captured
+stdout. A write that changes either result after observation is refused instead of being signed as
+though the checker evaluated it. A sandbox is still the right boundary for a command that must be
+prevented from reaching unrelated same-user paths.
+
+Every subprocess has an output detection limit, a deadline, and, on platforms with process groups,
+group signalling so a wrapper that stays in its group cannot leave a child behind. Exceeding the
+output limit ends the run instead of packaging a truncated result. The current file-backed capture
+polls for overflow, so it detects an excess rather than enforcing a precise filesystem quota; callers
+that need a hard disk bound must run the emitter in an environment that provides one. A final bounded
+read still refuses an overflow that appears after the last poll, so no oversized result is signed or
+held in memory. Process-group cleanup narrows resource and availability exposure rather than proving
+integrity: the final byte bindings refuse a pre-signing change, and a validator rejects a later one.
+A child that deliberately leaves the group still needs a process sandbox or resource boundary outside
+this command.
 
 The custody and coverage flags are declarations the operator makes and then signs, so they have no
 defaults and the command refuses to run without them. A disclosure claim in particular is something
