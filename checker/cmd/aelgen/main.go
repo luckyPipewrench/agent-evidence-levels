@@ -2629,7 +2629,7 @@ func reportCases(root string, cases []caseDef, options reportOptions) (CorpusRep
 		}
 
 		if !options.JSON {
-			fmt.Fprintf(out, "%s: %s expected: %s [%s]\n",
+			_, _ = fmt.Fprintf(out, "%s: %s expected: %s [%s]\n",
 				c.name, reportSummary(report), reportExpected(c.expect), okLabel(ok))
 		}
 	}
