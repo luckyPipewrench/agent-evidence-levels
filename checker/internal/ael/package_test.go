@@ -43,7 +43,10 @@ func TestArtifactBindingRequiresExactManifestPath(t *testing.T) {
 			DiscoveredRuns: []string{"run-1"},
 		}}
 		err := validateArtifactBinding(t.TempDir(), manifest)
-		if err == nil || !strings.Contains(err.Error(), "artifact manifest must be") {
+		// Assert the exact required path, not just the message stem. Checking only
+		// the stem would pass even if the code demanded the WRONG path, which makes
+		// the guard look tested while testing nothing about which file it binds.
+		if err == nil || !strings.Contains(err.Error(), `artifact manifest must be "artifact/manifest.json"`) {
 			t.Fatalf("declared %q: error = %v, want rejection naming the exact manifest path", declared, err)
 		}
 	}
