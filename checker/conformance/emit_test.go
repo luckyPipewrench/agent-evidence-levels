@@ -270,7 +270,13 @@ func TestEmitRecordsOneInvocation(t *testing.T) {
 	// The recorded arguments must reproduce the recorded bytes.
 	command := exec.Command("./"+filepath.Join("checker", "aelcheck"), evaluation.Arguments...)
 	command.Dir = harness.options.OutDir
-	replayed, _ := command.Output()
+	replayed, replayErr := command.Output()
+	if replayErr != nil {
+		// Discarding this let a replay that exited nonzero pass whenever its
+		// partial stdout happened to match, which is the opposite of what a
+		// replay claim asserts.
+		t.Fatalf("replaying the recorded arguments failed: %v", replayErr)
+	}
 	recorded, err := os.ReadFile(filepath.Join(harness.options.OutDir, filepath.FromSlash(evaluation.MachineOutput.Path)))
 	if err != nil {
 		t.Fatal(err)

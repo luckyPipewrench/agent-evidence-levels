@@ -62,6 +62,10 @@ func runEmit(arguments []string) int {
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "aelpackage emit: unexpected argument %q\n", flags.Arg(0))
+		return 2
+	}
 
 	operatorPrivate, err := readPrivateKey(*operatorKey)
 	if err != nil {
@@ -128,8 +132,11 @@ func runEmit(arguments []string) int {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(result); err != nil {
-			fmt.Fprintf(os.Stderr, "aelpackage emit: encode result: %v\n", err)
-			return 1
+			// The package is already published at this point. Returning 1 would
+			// say no package exists, and a caller acting on that would retry an
+			// emission that already completed.
+			fmt.Fprintf(os.Stderr, "aelpackage emit: package published at %s but the result could not be reported: %v\n", result.PackageDir, err)
+			return exitReportFailed
 		}
 	} else {
 		fmt.Printf("evaluation-package %s: run %s, checker exit %d\n", result.PackageID, result.Run, result.ExitStatus)
@@ -148,6 +155,12 @@ func runEmit(arguments []string) int {
 // exitEmittedNonconforming means the package was written and the artifact did
 // not conform. It is distinct from 1, which means no package exists.
 const exitEmittedNonconforming = 3
+
+// exitReportFailed means the package was written and published but its result
+// could not be reported. It is distinct from 1, which means no package exists,
+// because the two call for opposite responses: one is safe to retry and the
+// other would duplicate completed work.
+const exitReportFailed = 4
 
 // readPrivateKey loads an Ed25519 signing key. A signing key readable by other
 // accounts is refused: the whole package rests on that key being the operator's

@@ -69,6 +69,7 @@ Exit statuses distinguish the two failures that demand opposite responses:
 | 1 | No package exists; the emit itself failed. |
 | 2 | Usage error. |
 | 3 | The package was written and the artifact did not conform. |
+| 4 | The package was written and published, but its result could not be reported. |
 
 Status 3 is the case worth reading twice. A nonconforming artifact is still packaged, carrying its
 real exit status, and the validator then displays it as `EVALUATION-FAILED`. Refusing to emit there
