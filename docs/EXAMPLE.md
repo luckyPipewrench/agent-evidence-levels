@@ -56,7 +56,16 @@ m  UV   no covered event classes declared; omission-detection unverifiable
 n  UV   manifest anchor block is absent
 ...
 run run-ael1-valid: AEL-1 R-pending (coverage: declared-only; custody: same-process; anchor: none; retention: operator-declared 30d/fixture)
+
+This is a self-run evaluation result and is not an AEL grade.
+A grade is earned only through a verification record issued by an eligible verifier,
+who must not be the producer or the operator of the artifact evaluated here.
 ```
+
+The closing notice is part of the output, not commentary on it. Section 2 clause 7 forbids a
+producer-run or operator-run evaluation from supporting a public AEL grade or being labelled
+`AEL-n`, and this command is runnable by the producer. Section 3 item 5 requires the grade line in
+the shape above, so the line stays and the output states what it is.
 
 ## 4. Why AEL-1 and not higher
 
