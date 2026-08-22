@@ -233,3 +233,6 @@ conforming published grade requires a signed package that carries the exact arti
 inputs, artifact-evaluation result, and conformance-corpus result as content-addressed blobs and binds
 them to the checker executable and source revision, verifier identity and relationships, and result
 status.
+
+`docs/VERIFICATION-PACKAGE.md` defines the package layout, separate package kinds, detached
+signatures, and current-status validation.

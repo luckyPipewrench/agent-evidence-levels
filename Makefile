@@ -12,6 +12,7 @@ build:
 	@mkdir -p $(BIN)
 	go build -o $(BIN)/aelcheck ./checker/cmd/aelcheck
 	go build -o $(BIN)/aelgen   ./checker/cmd/aelgen
+	go build -o $(BIN)/aelpackage ./checker/cmd/aelpackage
 
 gen: build
 	$(BIN)/aelgen --out ./fixtures
