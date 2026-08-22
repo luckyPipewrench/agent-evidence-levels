@@ -9,8 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -93,18 +95,44 @@ type govEventExpect struct {
 func main() {
 	outDir := flag.String("out", "", "fixture output directory")
 	report := flag.Bool("report", false, "run checker over generated fixtures and print a report")
+	reportJSON := flag.Bool("json", false, "emit the machine-readable corpus report instead of the human one")
 	flag.Parse()
 	if *outDir == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: aelgen --out <dir> [--report]")
+		fmt.Fprintln(os.Stderr, "usage: aelgen --out <dir> [--report [--json]]")
 		os.Exit(2)
 	}
-	if err := generate(*outDir, *report); err != nil {
+	if *reportJSON && !*report {
+		fmt.Fprintln(os.Stderr, "aelgen: --json requires --report")
+		os.Exit(2)
+	}
+	if err := generate(*outDir, *report, *reportJSON); err != nil {
 		fmt.Fprintf(os.Stderr, "aelgen: %v\n", err)
-		os.Exit(1)
+		os.Exit(statusForGenerateError(err))
 	}
 }
 
-func generate(outDir string, report bool) error {
+// statusForGenerateError maps a generate failure onto a process status.
+//
+// A corpus that disagrees with its expectations is a finding about the corpus.
+// A reporter that could not run is a finding about the tool. Collapsing them
+// would let a broken run read as a failing corpus and a failing corpus read as
+// a broken run, so they get different statuses.
+//
+// This is a named function rather than an inline branch because it is the
+// decision an operator's automation actually reads, and a test that constructs
+// the error itself and asserts on its own construction proves nothing about it.
+func statusForGenerateError(err error) int {
+	if err == nil {
+		return 0
+	}
+	var mismatch *corpusMismatchError
+	if errors.As(err, &mismatch) {
+		return exitCorpusMismatch
+	}
+	return 1
+}
+
+func generate(outDir string, report, reportJSON bool) error {
 	if err := os.RemoveAll(outDir); err != nil {
 		return err
 	}
@@ -131,9 +159,27 @@ func generate(outDir string, report bool) error {
 		return err
 	}
 	if report {
-		return reportCases(outDir, cases)
+		result, err := reportCases(outDir, cases, reportOptions{JSON: reportJSON})
+		if err != nil {
+			return err
+		}
+		if result.ExitStatus() != 0 {
+			return &corpusMismatchError{report: result}
+		}
+		return nil
 	}
 	return nil
+}
+
+// corpusMismatchError reports a corpus that disagrees with its expectations.
+// It is distinct from an ordinary error so the caller can exit with the status
+// meaning "the corpus did not conform" rather than "the reporter broke".
+type corpusMismatchError struct {
+	report CorpusReport
+}
+
+func (e *corpusMismatchError) Error() string {
+	return fmt.Sprintf("%d of %d corpus cases do not match their expectations", e.report.Mismatched, e.report.Total)
 }
 
 type packageFixture struct {
@@ -2519,19 +2565,100 @@ func claimedExpectedRung(exp expected) int {
 	return max
 }
 
-func reportCases(root string, cases []caseDef) error {
+// CorpusReport is the machine-readable conformance result. A package carries
+// this file as its conformance evidence, so it has to state the outcome in the
+// artifact itself rather than only on the terminal.
+type CorpusReport struct {
+	CorpusFormat int          `json:"corpus_format"`
+	Total        int          `json:"total"`
+	Matched      int          `json:"matched"`
+	Mismatched   int          `json:"mismatched"`
+	Cases        []CorpusCase `json:"cases"`
+}
+
+type CorpusCase struct {
+	Name     string          `json:"name"`
+	Match    bool            `json:"match"`
+	Expected string          `json:"expected"`
+	Runs     []CorpusCaseRun `json:"runs"`
+}
+
+type CorpusCaseRun struct {
+	Run   string `json:"run"`
+	Grade string `json:"grade"`
+	R     string `json:"r"`
+}
+
+// ExitStatus separates a corpus that disagrees with its expectations from a
+// reporter that could not run. They are different findings and they need
+// different responses, so they must not share a status.
+func (r CorpusReport) ExitStatus() int {
+	if r.Mismatched > 0 {
+		return exitCorpusMismatch
+	}
+	return 0
+}
+
+const exitCorpusMismatch = 3
+
+type reportOptions struct {
+	JSON bool
+	Out  io.Writer
+}
+
+// reportCases grades every corpus case against its expectation.
+//
+// It returns an error only when the report could not be produced. A case that
+// disagrees with its expectation is a RESULT, carried in the returned report
+// and its exit status. Previously this function computed that verdict, printed
+// it, and returned nil either way, so a corpus with a failing case exited 0 and
+// any automation reading the status saw success.
+func reportCases(root string, cases []caseDef, options reportOptions) (CorpusReport, error) {
+	out := options.Out
+	if out == nil {
+		out = os.Stdout
+	}
+	result := CorpusReport{CorpusFormat: 1}
 	for _, c := range cases {
 		caseDir := filepath.Join(root, filepath.FromSlash(c.name))
 		art, err := ael.LoadArtifact(caseDir, filepath.Join(caseDir, "keys"))
 		if err != nil {
-			return err
+			return CorpusReport{}, err
 		}
 		report := ael.Evaluate(art)
 		ok := compareExpected(report, c.expect)
-		fmt.Printf("%s: %s expected: %s [%s]\n",
-			c.name, reportSummary(report), reportExpected(c.expect), okLabel(ok))
+
+		entry := CorpusCase{Name: c.name, Match: ok, Expected: reportExpected(c.expect)}
+		for _, res := range report.Runs {
+			entry.Runs = append(entry.Runs, CorpusCaseRun{Run: res.Run, Grade: reportGrade(res), R: res.R})
+		}
+		result.Cases = append(result.Cases, entry)
+		result.Total++
+		if ok {
+			result.Matched++
+		} else {
+			result.Mismatched++
+		}
+
+		if !options.JSON {
+			// A failed write is a reporter failure, not a corpus verdict.
+			// Discarding it let a broken output stream present as either a
+			// clean corpus or a mismatching one, depending on nothing.
+			if _, err := fmt.Fprintf(out, "%s: %s expected: %s [%s]\n",
+				c.name, reportSummary(report), reportExpected(c.expect), okLabel(ok)); err != nil {
+				return CorpusReport{}, fmt.Errorf("write corpus report: %w", err)
+			}
+		}
 	}
-	return nil
+
+	if options.JSON {
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(result); err != nil {
+			return CorpusReport{}, fmt.Errorf("encode corpus report: %w", err)
+		}
+	}
+	return result, nil
 }
 
 func compareExpected(report ael.Report, exp expected) bool {
