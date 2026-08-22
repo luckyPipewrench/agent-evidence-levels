@@ -1171,11 +1171,12 @@ func validateArtifactBinding(root string, manifest *PackageManifest) error {
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(manifest.ArtifactBinding.Manifest.Path, manifest.ArtifactBinding.Root+"/") {
-		return fmt.Errorf("artifact manifest must be inside artifact root")
-	}
-	if !strings.HasSuffix(manifest.ArtifactBinding.Manifest.Path, "/manifest.json") {
-		return fmt.Errorf("artifact manifest must name manifest.json")
+	// The loader always reads <root>/manifest.json, so the DECLARED path must be
+	// exactly that file. A prefix-and-suffix pair accepted any nested manifest.json
+	// inside the root, which let a package declare and hash one file while the
+	// evaluation read a different one, leaving the digest binding nothing.
+	if manifest.ArtifactBinding.Manifest.Path != manifest.ArtifactBinding.Root+"/"+packageManifestName {
+		return fmt.Errorf("artifact manifest must be %q", manifest.ArtifactBinding.Root+"/"+packageManifestName)
 	}
 	art, err := LoadArtifact(artifactRoot, keysDir)
 	if err != nil {
