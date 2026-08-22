@@ -824,11 +824,33 @@ func anchorAnnotation(art *Artifact) string {
 	return art.Manifest.Anchor.Log
 }
 
+// retentionAnnotation renders the retention annotation for a grade line.
+//
+// Section 3.7 requires the checker to report the declared retention value AND
+// to label it as an operator declaration. The bare value satisfied only the
+// first half: it sat in a list beside custody and anchor, which the checker
+// genuinely verifies, so a reader could take it for something established.
+// Retention is a promise about future storage that no checker can verify from
+// an artifact presented today, which is what the label is carrying.
+//
+// A missing period is named rather than printed as a number. The bare form
+// rendered an undeclared period as "0d", which asserts a zero-day policy the
+// operator never stated, and "we keep nothing" is a very different claim from
+// "no period declared". A missing declaration says so for the same reason:
+// having looked and found nothing is not the same as being unable to tell.
 func retentionAnnotation(r Retention) string {
 	if r.PeriodDays == 0 && r.Custody == "" {
-		return "unknown"
+		return "not declared"
 	}
-	return fmt.Sprintf("%dd/%s", r.PeriodDays, emptyAsUnknown(r.Custody))
+	period := "period-undeclared"
+	if r.PeriodDays != 0 {
+		period = fmt.Sprintf("%dd", r.PeriodDays)
+	}
+	custody := "custody-undeclared"
+	if r.Custody != "" {
+		custody = r.Custody
+	}
+	return fmt.Sprintf("operator-declared %s/%s", period, custody)
 }
 
 func logsForArtifactRun(art *Artifact) []*RecorderLog {

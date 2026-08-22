@@ -55,7 +55,7 @@ k  FAIL fewer than two recorders on the run
 m  UV   no covered event classes declared; omission-detection unverifiable
 n  UV   manifest anchor block is absent
 ...
-run run-ael1-valid: AEL-1 R-pending (coverage: declared-only; custody: same-process; anchor: none; retention: 30d/fixture)
+run run-ael1-valid: AEL-1 R-pending (coverage: declared-only; custody: same-process; anchor: none; retention: operator-declared 30d/fixture)
 ```
 
 ## 4. Why AEL-1 and not higher
