@@ -1,0 +1,227 @@
+{
+  "runs": [
+    {
+      "grade": 2,
+      "run": "run-mixed-a",
+      "r": "pending",
+      "checks": {
+        "R": {
+          "status": "UV",
+          "message": "one or more activities lack replayable decisions"
+        },
+        "a": {
+          "status": "PASS",
+          "message": "all signatures verify over stored payload bytes"
+        },
+        "b": {
+          "status": "PASS",
+          "message": "all verified payloads are canonical"
+        },
+        "c": {
+          "status": "UV",
+          "message": "no byte-level modification was constructed for this artifact; corpus fixtures demonstrate rejection"
+        },
+        "d": {
+          "status": "PASS",
+          "message": "record sequence order strictly increases from seq 0"
+        },
+        "e": {
+          "status": "PASS",
+          "message": "each record links to the preceding presented record"
+        },
+        "f": {
+          "status": "PASS",
+          "message": "each recorder opens with hmax\u003e0"
+        },
+        "g": {
+          "status": "PASS",
+          "message": "sequence numbers are contiguous"
+        },
+        "h": {
+          "status": "PASS",
+          "message": "signed heartbeats are present when enabled and record spacing is within hmax+htol"
+        },
+        "i": {
+          "status": "PASS",
+          "message": "close commits to count and previous head"
+        },
+        "j": {
+          "status": "PASS",
+          "message": "closed or not claiming AEL-1 liveness"
+        },
+        "k": {
+          "status": "PASS",
+          "message": "all recorders independently satisfy AEL-1"
+        },
+        "l": {
+          "status": "PASS",
+          "message": "verified recorder signing keys differ"
+        },
+        "m": {
+          "status": "PASS",
+          "message": "covered event ids match across recorders"
+        },
+        "n": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "o": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "p": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "q": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "r": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "s": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "t": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "u": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "v": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "w": {
+          "status": "PASS",
+          "message": "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"
+        }
+      },
+      "coverage": "enforced-total",
+      "custody": "same-operator",
+      "anchor": "none",
+      "retention": "30d/fixture",
+      "open": false,
+      "notes": [
+        "AEL-3 capped: check n is UV (manifest anchor block is absent)"
+      ]
+    },
+    {
+      "grade": 0,
+      "run": "run-mixed-b",
+      "r": "pending",
+      "checks": {
+        "R": {
+          "status": "UV",
+          "message": "one or more activities lack replayable decisions"
+        },
+        "a": {
+          "status": "PASS",
+          "message": "all signatures verify over stored payload bytes"
+        },
+        "b": {
+          "status": "PASS",
+          "message": "all verified payloads are canonical"
+        },
+        "c": {
+          "status": "UV",
+          "message": "no byte-level modification was constructed for this artifact; corpus fixtures demonstrate rejection"
+        },
+        "d": {
+          "status": "PASS",
+          "message": "record sequence order strictly increases from seq 0"
+        },
+        "e": {
+          "status": "PASS",
+          "message": "each record links to the preceding presented record"
+        },
+        "f": {
+          "status": "PASS",
+          "message": "each recorder opens with hmax\u003e0"
+        },
+        "g": {
+          "status": "PASS",
+          "message": "sequence numbers are contiguous"
+        },
+        "h": {
+          "status": "FAIL",
+          "message": "recorders/r1b.jsonl:1: hmax=60 requires at least one signed heartbeat record"
+        },
+        "i": {
+          "status": "FAIL",
+          "message": "r1b has no close"
+        },
+        "j": {
+          "status": "FAIL",
+          "message": "r1b OPEN/ABNORMAL-END: no close record"
+        },
+        "k": {
+          "status": "FAIL",
+          "message": "r1b is not independently AEL-1: recorders/r1b.jsonl:1: hmax=60 requires at least one signed heartbeat record"
+        },
+        "l": {
+          "status": "PASS",
+          "message": "verified recorder signing keys differ"
+        },
+        "m": {
+          "status": "PASS",
+          "message": "covered event ids match across recorders"
+        },
+        "n": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "o": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "p": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "q": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "r": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "s": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "t": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "u": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "v": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "w": {
+          "status": "PASS",
+          "message": "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"
+        }
+      },
+      "coverage": "enforced-total",
+      "custody": "same-operator",
+      "anchor": "none",
+      "retention": "30d/fixture",
+      "open": true,
+      "open_status": "OPEN/ABNORMAL-END",
+      "notes": [
+        "AEL-1 capped: OPEN/ABNORMAL-END"
+      ]
+    }
+  ]
+}

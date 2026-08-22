@@ -15,6 +15,8 @@ trusting the vendor or the operator.
 - **`docs/RATIONALE.md`** — non-normative positioning and adoption guidance, kept out of the spec.
 - **`docs/PRIOR-ART.md`** — how AEL relates to existing standards (transparency logs, audit-log and retention standards, evidence-handling), and what it deliberately does not restate.
 - **`docs/EXAMPLE.md`** — a worked end-to-end example: one real artifact from bytes to a grade.
+- **`docs/VERIFICATION-PACKAGE.md`** — signed packages for replaying an evaluation and publishing a
+  verified per-run result.
 - **`schema/`** — JSON Schemas for the record payload and manifest, for independent reimplementers.
 - **`CONTRIBUTING.md`** — contribution rules and required validation.
 
@@ -46,6 +48,12 @@ aelcheck --keys <keysdir> <artifact>
 
 grades one artifact and prints the full grade line plus a per-check PASS / FAIL / UNABLE-TO-VERIFY
 table.
+
+```
+aelpackage --keys <trust-root> validate <package-dir>
+```
+
+validates a signed evaluation package or verification record. A verification record needs a separately signed current-status statement and a relying-party evaluation time before a consumer may display `VERIFIED`; see `docs/VERIFICATION-PACKAGE.md`.
 
 ## Licensing
 

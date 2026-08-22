@@ -127,8 +127,692 @@ func generate(outDir string, report bool) error {
 	if err := writeCaseManifest(outDir, cases); err != nil {
 		return err
 	}
+	if err := writePackageFixtures(outDir); err != nil {
+		return err
+	}
 	if report {
 		return reportCases(outDir, cases)
+	}
+	return nil
+}
+
+type packageFixture struct {
+	packageDir    string
+	statusPath    string
+	statusSigPath string
+	recordID      string
+}
+
+type packageFixtureStatus struct {
+	State          string
+	IssuedAt       string
+	NextUpdate     string
+	EffectiveAt    string
+	OmitNextUpdate bool
+}
+
+const packageFixtureEvaluationTime = "2026-01-03T12:00:00Z"
+
+func writePackageFixtures(root string) error {
+	if _, err := writePackageFixture(root, "valid_verification_record", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "valid_evaluation_package", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	}
+	if signedManifest, err := writePackageFixture(root, "manifest_signature_tampered", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifestWithoutSignature(signedManifest.packageDir, func(manifest map[string]any) error {
+		manifest["issued_at"] = "2026-01-04T00:00:00Z"
+		return nil
+	}); err != nil {
+		return err
+	}
+	if carriesGrade, err := writePackageFixture(root, "evaluation_carries_grade", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(carriesGrade.packageDir, "package-operator", func(manifest map[string]any) error {
+		manifest["grades"] = packageFixtureGrades([]string{"run-ael1-valid"})
+		return nil
+	}); err != nil {
+		return err
+	}
+	if omittedInput, err := writePackageFixture(root, "undeclared_signer_key", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(omittedInput.packageDir, "package-verifier", func(manifest map[string]any) error {
+		_, _, verifierFP := labeledKey("package-verifier")
+		want := "inputs/package-keys/" + verifierFP + ".pub"
+		inputs, ok := manifest["verification_inputs"].([]any)
+		if !ok {
+			return fmt.Errorf("fixture verification inputs have wrong type")
+		}
+		filtered := make([]any, 0, len(inputs))
+		for _, value := range inputs {
+			blob, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("fixture verification input has wrong type")
+			}
+			if blob["path"] != want {
+				filtered = append(filtered, blob)
+			}
+		}
+		manifest["verification_inputs"] = filtered
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "tampered_blob", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "packages", "tampered_blob", "package", "results", "stdout.txt"), []byte("tampered fixture blob\n"), 0o644); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "missing_blob", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(root, "packages", "missing_blob", "package", "results", "stderr.txt")); err != nil {
+		return err
+	}
+	if pathEscape, err := writePackageFixture(root, "path_escape", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(pathEscape.packageDir, "package-verifier", func(manifest map[string]any) error {
+		files, ok := manifest["files"].([]any)
+		if !ok || len(files) == 0 {
+			return fmt.Errorf("fixture file manifest is empty")
+		}
+		first, ok := files[0].(map[string]any)
+		if !ok {
+			return fmt.Errorf("fixture file entry has wrong type")
+		}
+		first["path"] = "../escaped"
+		return nil
+	}); err != nil {
+		return err
+	}
+	if relabeled, err := writePackageFixture(root, "evaluation_relabelled", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(relabeled.packageDir, "package-operator", func(manifest map[string]any) error {
+		manifest["kind"] = "verification-record"
+		operator := manifest["operator"].(map[string]any)
+		delete(operator, "key")
+		return nil
+	}); err != nil {
+		return err
+	}
+	if operatorRewrapped, err := writePackageFixture(root, "evaluation_rewrapped_by_operator", "evaluation-package", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if grades, err := packageFixtureGradesForArtifact(operatorRewrapped.packageDir); err != nil {
+		return err
+	} else if err := rewritePackageManifest(operatorRewrapped.packageDir, "package-operator", func(manifest map[string]any) error {
+		_, _, operatorFP := labeledKey("package-operator")
+		manifest["kind"] = "verification-record"
+		manifest["operator"] = map[string]any{"id": "placeholder-operator"}
+		manifest["verifier"] = map[string]any{
+			"id": "forged-independent-verifier", "key": operatorFP,
+			"relationship_to_producer": "independent", "relationship_to_operator": "independent",
+		}
+		manifest["grades"] = grades
+		return nil
+	}); err != nil {
+		return err
+	}
+	if sameProducer, err := writePackageFixture(root, "verifier_is_producer", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(sameProducer.packageDir, "package-verifier", func(manifest map[string]any) error {
+		verifier := manifest["verifier"].(map[string]any)
+		verifier["id"] = "placeholder-producer"
+		return nil
+	}); err != nil {
+		return err
+	}
+	if sameOperator, err := writePackageFixture(root, "verifier_is_operator", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(sameOperator.packageDir, "package-verifier", func(manifest map[string]any) error {
+		verifier := manifest["verifier"].(map[string]any)
+		verifier["id"] = "placeholder-operator"
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "omitted_discovered_run", "verification-record", "multi_run/manifest_omits_bad_run", []string{"run-mixed-a"}, "current"); err != nil {
+		return err
+	}
+	if bindingOmitted, err := writePackageFixture(root, "binding_omits_discovered_run", "verification-record", "multi_run/manifest_omits_bad_run", []string{"run-mixed-a", "run-mixed-b"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(bindingOmitted.packageDir, "package-verifier", func(manifest map[string]any) error {
+		binding := manifest["artifact_binding"].(map[string]any)
+		binding["discovered_runs"] = []any{"run-mixed-a"}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if gradeOmitted, err := writePackageFixture(root, "grades_omit_discovered_run", "verification-record", "multi_run/manifest_omits_bad_run", []string{"run-mixed-a", "run-mixed-b"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(gradeOmitted.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["grades"] = packageFixtureGrades([]string{"run-mixed-a"})
+		return nil
+	}); err != nil {
+		return err
+	}
+	if evaluationFailed, err := writePackageFixture(root, "evaluation_failed", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(evaluationFailed.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["artifact_evaluation"].(map[string]any)["exit_status"] = 3
+		return nil
+	}); err != nil {
+		return err
+	}
+	if conformanceFailed, err := writePackageFixture(root, "conformance_failed", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(conformanceFailed.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["conformance"].(map[string]any)["exit_status"] = 1
+		return nil
+	}); err != nil {
+		return err
+	}
+	if expired, err := writePackageFixture(root, "expired_record", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(expired.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["expires_at"] = packageFixtureEvaluationTime
+		return nil
+	}); err != nil {
+		return err
+	}
+	if emptyCommand, err := writePackageFixture(root, "empty_conformance_command", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(emptyCommand.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["conformance"].(map[string]any)["command"] = []any{}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if gradeMismatch, err := writePackageFixture(root, "grade_disagrees_with_result", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(gradeMismatch.packageDir, "package-verifier", func(manifest map[string]any) error {
+		grade := manifest["grades"].([]any)[0].(map[string]any)
+		grade["line"] = "run run-ael1-valid: AEL-3 R-pending (coverage: declared-only; custody: same-process; anchor: none; retention: 30d/fixture)"
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "revoked_replay", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "revoked"); err != nil {
+		return err
+	}
+	if _, err := writePackageFixture(root, "superseded_replay", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "superseded"); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_stale", packageFixtureStatus{State: "current", IssuedAt: "2026-01-01T00:00:00Z", NextUpdate: "2026-01-03T00:00:00Z"}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_future_issued_at", packageFixtureStatus{State: "current", IssuedAt: "2026-01-04T00:00:00Z", NextUpdate: "2026-01-05T00:00:00Z"}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_at_issued_at", packageFixtureStatus{State: "current", IssuedAt: packageFixtureEvaluationTime, NextUpdate: "2026-01-04T00:00:00Z"}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_at_next_update", packageFixtureStatus{State: "current", IssuedAt: "2026-01-03T00:00:00Z", NextUpdate: packageFixtureEvaluationTime}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_missing_next_update", packageFixtureStatus{State: "current", IssuedAt: "2026-01-03T00:00:00Z", OmitNextUpdate: true}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_next_update_equals_issued_at", packageFixtureStatus{State: "current", IssuedAt: "2026-01-03T00:00:00Z", NextUpdate: "2026-01-03T00:00:00Z"}); err != nil {
+		return err
+	}
+	if err := writeCurrentStatusFixture(root, "status_current_next_update_before_issued_at", packageFixtureStatus{State: "current", IssuedAt: "2026-01-03T00:00:00Z", NextUpdate: "2026-01-02T23:59:59Z"}); err != nil {
+		return err
+	}
+	if statusSignature, err := writePackageFixture(root, "status_signature_tampered", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
+		return err
+	} else if err := os.WriteFile(statusSignature.statusSigPath, []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\n"), 0o644); err != nil {
+		return err
+	}
+	return writePackageFixtureExpectations(root)
+}
+
+func writePackageFixture(root, name, kind, artifactCase string, discoveredRuns []string, statusState string) (packageFixture, error) {
+	fixtureRoot := filepath.Join(root, "packages", name)
+	packageDir := filepath.Join(fixtureRoot, "package")
+	artifactSource := filepath.Join(root, filepath.FromSlash(artifactCase))
+	if err := copyArtifactForPackage(artifactSource, filepath.Join(packageDir, "artifact")); err != nil {
+		return packageFixture{}, err
+	}
+	if err := copyTree(filepath.Join(artifactSource, "keys"), filepath.Join(packageDir, "inputs", "keys")); err != nil {
+		return packageFixture{}, err
+	}
+	operatorPriv, operatorPub, operatorFP := labeledKey("package-operator")
+	verifierPriv, verifierPub, verifierFP := labeledKey("package-verifier")
+	_, statusPub, statusFP := labeledKey("package-status")
+	for fingerprint, pub := range map[string]ed25519.PublicKey{operatorFP: operatorPub, verifierFP: verifierPub, statusFP: statusPub} {
+		if err := writeFixturePublicKey(filepath.Join(packageDir, "inputs", "package-keys"), fingerprint, pub); err != nil {
+			return packageFixture{}, err
+		}
+	}
+	report, err := writePackageFixtureFiles(packageDir)
+	if err != nil {
+		return packageFixture{}, err
+	}
+	files, err := packageFixtureBlobs(packageDir)
+	if err != nil {
+		return packageFixture{}, err
+	}
+	byPath := map[string]map[string]any{}
+	for _, blob := range files {
+		byPath[blob["path"].(string)] = blob
+	}
+	lookup := func(name string) (map[string]any, error) {
+		blob, ok := byPath[name]
+		if !ok {
+			return nil, fmt.Errorf("fixture blob %q is absent", name)
+		}
+		return blob, nil
+	}
+	artifactManifest, err := lookup("artifact/manifest.json")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	executable, err := lookup("checker/aelcheck")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	machineOutput, err := lookup("results/artifact.json")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	stdout, err := lookup("results/stdout.txt")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	stderr, err := lookup("results/stderr.txt")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	corpusResult, err := lookup("results/conformance.json")
+	if err != nil {
+		return packageFixture{}, err
+	}
+	var inputs []any
+	for _, blob := range files {
+		if strings.HasPrefix(blob["path"].(string), "inputs/") {
+			inputs = append(inputs, blob)
+		}
+	}
+
+	manifest := map[string]any{
+		"kind":                 kind,
+		"package_format":       1,
+		"id":                   "fixture-" + name,
+		"run":                  discoveredRuns[0],
+		"producer":             map[string]any{"id": "placeholder-producer"},
+		"verification_custody": map[string]any{"acquisition": "declared", "replay": "available", "review": "declared", "issuance": "signed"},
+		"evidence_coverage":    map[string]any{"scope": "declared", "disclosure": "complete-package"},
+		"artifact_binding":     map[string]any{"root": "artifact", "keys_dir": "inputs/keys", "manifest": artifactManifest, "discovered_runs": stringsToAny(discoveredRuns)},
+		"files":                mapsToAny(files),
+		"verification_inputs":  inputs,
+		"spec":                 map[string]any{"version": "0.1", "digest_algorithm": "sha-256", "digest": shaHex([]byte("fixture specification"))},
+		"checker":              map[string]any{"name": "aelcheck", "source_revision": "fixture-revision", "executable": executable},
+		"artifact_evaluation":  map[string]any{"arguments": []any{"--json", "artifact"}, "exit_status": 0, "machine_output": machineOutput, "stdout": stdout, "stderr": stderr},
+		"conformance":          map[string]any{"corpus": map[string]any{"version": "fixture-corpus", "digest_algorithm": "sha-256", "digest": shaHex([]byte("fixture corpus"))}, "command": []any{"make", "check"}, "exit_status": 0, "result": corpusResult},
+		"issued_at":            "2026-01-02T00:00:00Z",
+		"status_authority":     map[string]any{"id": "placeholder-status-authority", "key": statusFP, "record_id": "fixture-" + name},
+	}
+	signer := verifierPriv
+	if kind == "evaluation-package" {
+		manifest["operator"] = map[string]any{"id": "placeholder-operator", "key": operatorFP}
+		signer = operatorPriv
+	} else {
+		manifest["operator"] = map[string]any{"id": "placeholder-operator"}
+		manifest["verifier"] = map[string]any{"id": "placeholder-verifier", "key": verifierFP, "relationship_to_producer": "independent", "relationship_to_operator": "independent"}
+		manifest["grades"] = packageFixtureGradesFromReport(report)
+	}
+	if err := writeSignedPackageManifest(packageDir, manifest, signer); err != nil {
+		return packageFixture{}, err
+	}
+
+	trustDir := filepath.Join(fixtureRoot, "trust")
+	if err := writeFixturePublicKey(filepath.Join(trustDir, "operators"), operatorFP, operatorPub); err != nil {
+		return packageFixture{}, err
+	}
+	if err := writeFixturePublicKey(filepath.Join(trustDir, "verifiers"), verifierFP, verifierPub); err != nil {
+		return packageFixture{}, err
+	}
+	if err := writeFixturePublicKey(filepath.Join(trustDir, "status"), statusFP, statusPub); err != nil {
+		return packageFixture{}, err
+	}
+	statusPath := filepath.Join(fixtureRoot, "status.json")
+	statusSigPath := filepath.Join(fixtureRoot, "status.sig")
+	if err := writeFixtureStatus(statusPath, statusSigPath, "fixture-"+name, statusState); err != nil {
+		return packageFixture{}, err
+	}
+	return packageFixture{packageDir: packageDir, statusPath: statusPath, statusSigPath: statusSigPath, recordID: "fixture-" + name}, nil
+}
+
+func writePackageFixtureFiles(packageDir string) (ael.Report, error) {
+	files := map[string][]byte{
+		"checker/aelcheck":         []byte("fixture checker executable\n"),
+		"inputs/specification.txt": []byte("fixture specification\n"),
+		"results/stdout.txt":       []byte("fixture evaluation output\n"),
+		"results/stderr.txt":       {},
+		"results/conformance.json": []byte("{\"result\":\"pass\"}\n"),
+	}
+	for name, raw := range files {
+		path := filepath.Join(packageDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return ael.Report{}, err
+		}
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			return ael.Report{}, err
+		}
+	}
+	artifact, err := ael.LoadArtifact(filepath.Join(packageDir, "artifact"), filepath.Join(packageDir, "inputs", "keys"))
+	if err != nil {
+		return ael.Report{}, err
+	}
+	report := ael.Evaluate(artifact)
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return ael.Report{}, err
+	}
+	raw = append(raw, '\n')
+	if err := os.WriteFile(filepath.Join(packageDir, "results", "artifact.json"), raw, 0o644); err != nil {
+		return ael.Report{}, err
+	}
+	return report, nil
+}
+
+func packageFixtureGradesForArtifact(packageDir string) ([]any, error) {
+	artifact, err := ael.LoadArtifact(filepath.Join(packageDir, "artifact"), filepath.Join(packageDir, "inputs", "keys"))
+	if err != nil {
+		return nil, err
+	}
+	return packageFixtureGradesFromReport(ael.Evaluate(artifact)), nil
+}
+
+func packageFixtureGradesFromReport(report ael.Report) []any {
+	grades := make([]any, 0, len(report.Runs))
+	for _, result := range report.Runs {
+		outcomes := make(map[string]any, len(result.Checks))
+		for id, outcome := range result.Checks {
+			outcomes[id] = outcome.Status
+		}
+		grades = append(grades, map[string]any{
+			"run":         result.Run,
+			"line":        result.GradeLine(),
+			"annotations": map[string]any{"coverage": result.Coverage, "custody": result.Custody, "anchor": result.Anchor, "retention": result.Retention},
+			"outcomes":    outcomes,
+		})
+	}
+	return grades
+}
+
+func copyArtifactForPackage(source, target string) error {
+	return filepath.WalkDir(source, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		if rel == "keys" || strings.HasPrefix(filepath.ToSlash(rel), "keys/") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Name() == "expect.json" {
+			return nil
+		}
+		if rel == "." {
+			return os.MkdirAll(target, 0o755)
+		}
+		destination := filepath.Join(target, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o755)
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(destination, raw, 0o644)
+	})
+}
+
+func copyTree(source, target string) error {
+	return filepath.WalkDir(source, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		destination := target
+		if rel != "." {
+			destination = filepath.Join(target, rel)
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o755)
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(destination, raw, 0o644)
+	})
+}
+
+func packageFixtureBlobs(root string) ([]map[string]any, error) {
+	var blobs []map[string]any
+	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(rel)
+		if name == "manifest.json" || name == "manifest.sig" {
+			return nil
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		blobs = append(blobs, map[string]any{"path": name, "size": len(raw), "digest_algorithm": "sha-256", "digest": shaHex(raw)})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(blobs, func(i, j int) bool { return blobs[i]["path"].(string) < blobs[j]["path"].(string) })
+	return blobs, nil
+}
+
+func mapsToAny(items []map[string]any) []any {
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		result = append(result, item)
+	}
+	return result
+}
+
+func stringsToAny(items []string) []any {
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		result = append(result, item)
+	}
+	return result
+}
+
+func packageFixtureGrades(runs []string) []any {
+	grades := make([]any, 0, len(runs))
+	for _, run := range runs {
+		grades = append(grades, map[string]any{
+			"run":         run,
+			"line":        "run " + run + ": AEL-1 R-pending (coverage: declared; custody: declared; anchor: none; retention: fixture)",
+			"annotations": map[string]any{"coverage": "declared", "custody": "declared", "anchor": "none", "retention": "fixture"},
+			"outcomes":    map[string]any{"a": "PASS"},
+		})
+	}
+	return grades
+}
+
+func writeSignedPackageManifest(packageDir string, manifest map[string]any, signer ed25519.PrivateKey) error {
+	raw, err := canonicalValue(manifest)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, "manifest.json"), raw, 0o644); err != nil {
+		return err
+	}
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(signer, raw))
+	return os.WriteFile(filepath.Join(packageDir, "manifest.sig"), []byte(sig+"\n"), 0o644)
+}
+
+func rewritePackageManifest(packageDir, signerLabel string, change func(map[string]any) error) error {
+	raw, err := os.ReadFile(filepath.Join(packageDir, "manifest.json"))
+	if err != nil {
+		return err
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return err
+	}
+	if err := change(manifest); err != nil {
+		return err
+	}
+	priv, _, _ := labeledKey(signerLabel)
+	return writeSignedPackageManifest(packageDir, manifest, priv)
+}
+
+func rewritePackageManifestWithoutSignature(packageDir string, change func(map[string]any) error) error {
+	raw, err := os.ReadFile(filepath.Join(packageDir, "manifest.json"))
+	if err != nil {
+		return err
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return err
+	}
+	if err := change(manifest); err != nil {
+		return err
+	}
+	raw, err = canonicalValue(manifest)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(packageDir, "manifest.json"), raw, 0o644)
+}
+
+func writeFixturePublicKey(root, fingerprint string, pub ed25519.PublicKey) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, fingerprint+".pub"), []byte(base64.StdEncoding.EncodeToString(pub)+"\n"), 0o644)
+}
+
+func writeCurrentStatusFixture(root, name string, status packageFixtureStatus) error {
+	fixture, err := writePackageFixture(root, name, "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current")
+	if err != nil {
+		return err
+	}
+	return writeFixtureStatusDefinition(fixture.statusPath, fixture.statusSigPath, fixture.recordID, status)
+}
+
+func writeFixtureStatus(path, signaturePath, recordID, state string) error {
+	status := packageFixtureStatus{
+		State:       state,
+		IssuedAt:    "2026-01-03T00:00:00Z",
+		NextUpdate:  "2026-01-04T00:00:00Z",
+		EffectiveAt: "2026-01-03T00:00:00Z",
+	}
+	return writeFixtureStatusDefinition(path, signaturePath, recordID, status)
+}
+
+func writeFixtureStatusDefinition(path, signaturePath, recordID string, definition packageFixtureStatus) error {
+	priv, _, _ := labeledKey("package-status")
+	status := map[string]any{
+		"status_format": 1,
+		"record_id":     recordID,
+		"authority":     "placeholder-status-authority",
+		"issued_at":     definition.IssuedAt,
+		"state":         definition.State,
+	}
+	if definition.State == "current" && !definition.OmitNextUpdate {
+		status["next_update"] = definition.NextUpdate
+	}
+	if definition.State != "current" {
+		status["effective_at"] = definition.EffectiveAt
+	}
+	if definition.State == "revoked" {
+		status["reason"] = "fixture revocation"
+	}
+	if definition.State == "superseded" {
+		status["reason"] = "fixture supersession"
+		status["replacement"] = recordID + "-replacement"
+	}
+	raw, err := canonicalValue(status)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		return err
+	}
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw))
+	return os.WriteFile(signaturePath, []byte(sig+"\n"), 0o644)
+}
+
+func writePackageFixtureExpectations(root string) error {
+	expected := map[string]map[string]string{
+		"valid_verification_record":                   {"display_state": "VERIFIED"},
+		"valid_evaluation_package":                    {"display_state": "EVALUATED"},
+		"manifest_signature_tampered":                 {"diagnostic": "package manifest signature verification failed"},
+		"evaluation_carries_grade":                    {"diagnostic": "unknown top-level key \"grades\""},
+		"undeclared_signer_key":                       {"diagnostic": "package signer public key is absent from verification inputs"},
+		"tampered_blob":                               {"diagnostic": "blob \"results/stdout.txt\" size or digest mismatch"},
+		"missing_blob":                                {"diagnostic": "required blob \"results/stderr.txt\" is missing"},
+		"path_escape":                                 {"diagnostic": "file manifest entry path: must be a normalized relative path"},
+		"evaluation_relabelled":                       {"diagnostic": "missing required top-level key \"verifier\""},
+		"evaluation_rewrapped_by_operator":            {"diagnostic": "missing trusted package signer key"},
+		"verifier_is_producer":                        {"diagnostic": "verifier must not equal producer"},
+		"verifier_is_operator":                        {"diagnostic": "verifier must not equal operator"},
+		"omitted_discovered_run":                      {"diagnostic": "artifact binding discovered runs"},
+		"binding_omits_discovered_run":                {"diagnostic": "artifact binding discovered runs"},
+		"grades_omit_discovered_run":                  {"diagnostic": "verification record grades do not cover every discovered run"},
+		"evaluation_failed":                           {"display_state": "EVALUATION-FAILED"},
+		"conformance_failed":                          {"display_state": "CONFORMANCE-FAILED"},
+		"expired_record":                              {"display_state": "EXPIRED"},
+		"empty_conformance_command":                   {"diagnostic": "conformance command must not be empty"},
+		"grade_disagrees_with_result":                 {"diagnostic": "disagrees with artifact evaluation machine output"},
+		"revoked_replay":                              {"display_state": "REVOKED"},
+		"superseded_replay":                           {"display_state": "SUPERSEDED"},
+		"status_current_stale":                        {"display_state": "STATUS-UNKNOWN"},
+		"status_current_future_issued_at":             {"display_state": "STATUS-UNKNOWN"},
+		"status_current_at_issued_at":                 {"display_state": "VERIFIED"},
+		"status_current_at_next_update":               {"display_state": "STATUS-UNKNOWN"},
+		"status_current_missing_next_update":          {"display_state": "STATUS-UNKNOWN"},
+		"status_current_next_update_equals_issued_at": {"display_state": "STATUS-UNKNOWN"},
+		"status_current_next_update_before_issued_at": {"display_state": "STATUS-UNKNOWN"},
+		"status_signature_tampered":                   {"display_state": "STATUS-UNKNOWN"},
+	}
+	for name, value := range expected {
+		raw, err := canonicalValue(value)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(root, "packages", name, "package-expect.json"), raw, 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
 }
