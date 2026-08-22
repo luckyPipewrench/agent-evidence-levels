@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,8 +81,9 @@ func newEmitHarness(t *testing.T, artifactCase string) emitHarness {
 	if err := os.WriteFile(corpusPath, []byte("corpus identity\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	conformancePath := filepath.Join(root, "conformance.json")
-	if err := os.WriteFile(conformancePath, []byte("{\"result\":\"pass\"}\n"), 0o644); err != nil {
+	// The conformance command is run now, so the harness supplies a real one.
+	conformancePath := filepath.Join(root, "conformance.sh")
+	if err := os.WriteFile(conformancePath, []byte("#!/bin/sh\nprintf '{\"result\":\"pass\"}\\n'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,28 +96,26 @@ func newEmitHarness(t *testing.T, artifactCase string) emitHarness {
 	return emitHarness{
 		trustRoot: trustRoot,
 		options: ael.EmitOptions{
-			ArtifactDir:           artifact,
-			ArtifactKeysDir:       filepath.Join(artifact, "keys"),
-			CheckerPath:           buildChecker(t),
-			CheckerName:           "aelcheck",
-			SourceRevision:        "test-revision",
-			PackageID:             "emitted-" + filepath.Base(artifactCase),
-			ProducerID:            "test-producer",
-			OperatorID:            "test-operator",
-			OperatorKey:           operatorPriv,
-			StatusAuthorityID:     "test-status-authority",
-			StatusPublicKey:       statusPub,
-			Custody:               ael.PackageCustody{Acquisition: "declared", Replay: "available", Review: "declared", Issuance: "signed"},
-			Coverage:              ael.PackageCoverage{Scope: "declared", Disclosure: "complete-package"},
-			SpecVersion:           "0.1",
-			SpecPath:              specPath,
-			CorpusVersion:         "test-corpus",
-			CorpusDigestPath:      corpusPath,
-			ConformanceCommand:    []string{"make", "check"},
-			ConformanceResultPath: conformancePath,
-			ConformanceExitStatus: 0,
-			IssuedAt:              issued,
-			OutDir:                filepath.Join(root, "package"),
+			ArtifactDir:        artifact,
+			ArtifactKeysDir:    filepath.Join(artifact, "keys"),
+			CheckerPath:        buildChecker(t),
+			CheckerName:        "aelcheck",
+			SourceRevision:     "test-revision",
+			PackageID:          "emitted-" + filepath.Base(artifactCase),
+			ProducerID:         "test-producer",
+			OperatorID:         "test-operator",
+			OperatorKey:        operatorPriv,
+			StatusAuthorityID:  "test-status-authority",
+			StatusPublicKey:    statusPub,
+			Custody:            ael.PackageCustody{Acquisition: "declared", Replay: "available", Review: "declared", Issuance: "signed"},
+			Coverage:           ael.PackageCoverage{Scope: "declared", Disclosure: "complete-package"},
+			SpecVersion:        "0.1",
+			SpecPath:           specPath,
+			CorpusVersion:      "test-corpus",
+			CorpusDigestPath:   corpusPath,
+			ConformanceCommand: []string{conformancePath},
+			IssuedAt:           issued,
+			OutDir:             filepath.Join(root, "package"),
 		},
 	}
 }
@@ -631,4 +631,62 @@ func digestFile(path string) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// writeConformanceCommand creates a script standing in for a real conformance
+// run: it writes a result blob to stdout and exits with the given status.
+func writeConformanceCommand(t *testing.T, verdict string, exitStatus int) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "conformance.sh")
+	body := "#!/bin/sh\n" +
+		"printf '{\"result\":\"" + verdict + "\"}\\n'\n" +
+		"exit " + strconv.Itoa(exitStatus) + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestEmitObservesConformanceExitStatus is the fix for a contradiction the
+// declared form allowed: a package could carry a conformance blob reporting
+// failure alongside a declared exit of zero, and still validate as EVALUATED.
+// Running the command makes the blob and the status come from one process, so
+// they cannot disagree.
+func TestEmitObservesConformanceExitStatus(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "FAIL", 3)}
+
+	result, err := ael.EmitEvaluationPackage(harness.options)
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if result.ConformanceExitStatus != 3 {
+		t.Fatalf("conformance exit status = %d, want the observed 3", result.ConformanceExitStatus)
+	}
+
+	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if validation.DisplayState != "CONFORMANCE-FAILED" {
+		t.Errorf("display state = %q, want CONFORMANCE-FAILED", validation.DisplayState)
+	}
+}
+
+// TestEmitCapturesConformanceOutput holds that the packaged conformance
+// evidence is what the run produced, not a file the operator chose.
+func TestEmitCapturesConformanceOutput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{writeConformanceCommand(t, "pass", 0)}
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexOf(string(raw), `"result":"pass"`) < 0 {
+		t.Errorf("packaged conformance result is not the command's output: %q", raw)
+	}
 }

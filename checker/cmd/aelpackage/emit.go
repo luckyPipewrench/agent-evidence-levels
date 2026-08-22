@@ -44,9 +44,8 @@ func runEmit(arguments []string) int {
 	specVersion := flags.String("spec-version", "", "specification version")
 	corpusDigestSource := flags.String("corpus-digest-source", "", "file whose digest identifies the conformance corpus")
 	corpusVersion := flags.String("corpus-version", "", "conformance corpus version")
-	conformanceResult := flags.String("conformance-result", "", "result file from the conformance run")
-	conformanceCommand := flags.String("conformance-command", "", "conformance command, space separated")
-	conformanceExit := flags.Int("conformance-exit", 0, "exit status of the conformance run")
+	conformanceCommand := flags.String("conformance-command", "", "conformance command to RUN, space separated")
+	conformanceDir := flags.String("conformance-dir", "", "directory to run the conformance command in; default is the current directory")
 	custodyAcquisition := flags.String("custody-acquisition", "", "operator declaration: how the artifact was acquired")
 	custodyReplay := flags.String("custody-replay", "", "operator declaration: replay availability")
 	custodyReview := flags.String("custody-review", "", "operator declaration: review performed")
@@ -112,16 +111,15 @@ func runEmit(arguments []string) int {
 			Scope:      *coverageScope,
 			Disclosure: *coverageDisclosure,
 		},
-		SpecVersion:           *specVersion,
-		SpecPath:              *specPath,
-		CorpusVersion:         *corpusVersion,
-		CorpusDigestPath:      *corpusDigestSource,
-		ConformanceCommand:    command,
-		ConformanceResultPath: *conformanceResult,
-		ConformanceExitStatus: *conformanceExit,
-		Run:                   *run,
-		IssuedAt:              issued,
-		OutDir:                *out,
+		SpecVersion:        *specVersion,
+		SpecPath:           *specPath,
+		CorpusVersion:      *corpusVersion,
+		CorpusDigestPath:   *corpusDigestSource,
+		ConformanceCommand: command,
+		ConformanceDir:     *conformanceDir,
+		Run:                *run,
+		IssuedAt:           issued,
+		OutDir:             *out,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aelpackage emit: %v\n", err)
@@ -139,14 +137,15 @@ func runEmit(arguments []string) int {
 			return exitReportFailed
 		}
 	} else {
-		fmt.Printf("evaluation-package %s: run %s, checker exit %d\n", result.PackageID, result.Run, result.ExitStatus)
+		fmt.Printf("evaluation-package %s: run %s, checker exit %d, conformance exit %d\n",
+			result.PackageID, result.Run, result.ExitStatus, result.ConformanceExitStatus)
 	}
 
 	// The emit succeeded. Whether the artifact conformed is a separate fact,
 	// carried by the package's recorded exit status and reported here so a
 	// caller reading only the status cannot mistake a packaged failure for a
 	// clean result.
-	if result.ExitStatus != 0 {
+	if result.ExitStatus != 0 || result.ConformanceExitStatus != 0 {
 		return exitEmittedNonconforming
 	}
 	return 0

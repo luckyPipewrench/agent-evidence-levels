@@ -41,12 +41,16 @@ make build
   --status-authority-id my-status-authority --status-key ./status.pub \
   --spec ./specification.txt --spec-version 0.1 \
   --corpus-digest-source ./corpus-id.txt --corpus-version v1 \
-  --conformance-result ./conformance.json --conformance-command "make check" \
+  --conformance-command "./bin/aelgen --report --json --out ./fixtures" \
   --custody-acquisition declared --custody-replay available \
   --custody-review declared --custody-issuance signed \
   --coverage-scope declared --coverage-disclosure complete-package \
   --id my-package-001 --out ./package
 ```
+
+The conformance command is run, not described. Its stdout becomes the packaged conformance result and its exit status becomes the recorded status, so the evidence and the verdict come from one process. Taking them as two declarations allowed a package to carry a result reporting failure alongside a declared exit of zero and still validate as `EVALUATED`.
+
+`aelgen --report --json` produces that result: a machine-readable corpus report on stdout, diagnostics on stderr, and status 3 when any case disagrees with its expectation.
 
 The custody and coverage flags are declarations the operator makes and then signs, so they have no
 defaults and the command refuses to run without them. A disclosure claim in particular is something

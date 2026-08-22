@@ -76,13 +76,17 @@ type EmitOptions struct {
 	Coverage          PackageCoverage
 
 	// Specification and conformance evidence.
-	SpecVersion           string
-	SpecPath              string
-	CorpusVersion         string
-	CorpusDigestPath      string
-	ConformanceCommand    []string
-	ConformanceResultPath string
-	ConformanceExitStatus int
+	SpecVersion      string
+	SpecPath         string
+	CorpusVersion    string
+	CorpusDigestPath string
+	// ConformanceCommand is RUN, not described. Taking the result blob and the
+	// exit status as separate declarations let a package carry a blob reporting
+	// failure alongside a declared exit of zero, and validate as EVALUATED. One
+	// process producing both removes the contradiction rather than checking for
+	// it. ConformanceDir is where it runs; empty means the current directory.
+	ConformanceCommand []string
+	ConformanceDir     string
 
 	// Run selects which discovered run the package is about. Empty means the
 	// first discovered run.
@@ -96,11 +100,12 @@ type EmitOptions struct {
 // not the emitter's: a nonzero value means the artifact did not conform and the
 // package says so, which is a successful emit of an unsuccessful evaluation.
 type EmitResult struct {
-	PackageDir     string   `json:"package_dir"`
-	PackageID      string   `json:"package_id"`
-	Run            string   `json:"run"`
-	DiscoveredRuns []string `json:"discovered_runs"`
-	ExitStatus     int      `json:"exit_status"`
+	PackageDir            string   `json:"package_dir"`
+	PackageID             string   `json:"package_id"`
+	Run                   string   `json:"run"`
+	DiscoveredRuns        []string `json:"discovered_runs"`
+	ExitStatus            int      `json:"exit_status"`
+	ConformanceExitStatus int      `json:"conformance_exit_status"`
 }
 
 // EmitEvaluationPackage runs the checker against the artifact and writes a
@@ -169,8 +174,9 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := copyFile(options.SpecPath, filepath.Join(packageDir, filepath.FromSlash(emitSpecPath)), 0o644); err != nil {
 		return EmitResult{}, fmt.Errorf("copy specification: %w", err)
 	}
-	if err := copyFile(options.ConformanceResultPath, filepath.Join(packageDir, filepath.FromSlash(emitConformancePath)), 0o644); err != nil {
-		return EmitResult{}, fmt.Errorf("copy conformance result: %w", err)
+	conformance, err := runConformance(options, packageDir)
+	if err != nil {
+		return EmitResult{}, err
 	}
 	// The corpus identity lives outside the package, so capture its declared
 	// digest before the checker runs. A later read could otherwise bind a source
@@ -309,7 +315,7 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		Conformance: PackageConformance{
 			Corpus:     PackageVersionedSum{Version: options.CorpusVersion, DigestAlgorithm: "sha-256", Digest: corpusDigest},
 			Command:    options.ConformanceCommand,
-			ExitStatus: options.ConformanceExitStatus,
+			ExitStatus: conformance.exitStatus,
 			Result:     conformanceResult,
 		},
 		IssuedAt: options.IssuedAt.UTC().Format(time.RFC3339),
@@ -332,11 +338,12 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 
 	succeeded = true
 	return EmitResult{
-		PackageDir:     options.OutDir,
-		PackageID:      options.PackageID,
-		Run:            run,
-		DiscoveredRuns: discovered,
-		ExitStatus:     evaluation.exitStatus,
+		PackageDir:            options.OutDir,
+		PackageID:             options.PackageID,
+		Run:                   run,
+		DiscoveredRuns:        discovered,
+		ExitStatus:            evaluation.exitStatus,
+		ConformanceExitStatus: conformance.exitStatus,
 	}, nil
 }
 
@@ -486,6 +493,54 @@ func pathWithin(candidate, ancestor string) bool {
 	return strings.HasPrefix(candidate, ancestor+string(filepath.Separator))
 }
 
+type conformanceRun struct {
+	exitStatus int
+}
+
+// runConformance executes the conformance command and packages what it
+// produced. Its stdout becomes the conformance result blob and its exit status
+// becomes the recorded status, so the evidence and the verdict come from one
+// process and cannot contradict each other.
+//
+// A failing conformance run is a RESULT, not an error: the package records the
+// nonzero status and the validator then shows CONFORMANCE-FAILED. Only a
+// command that could not be executed at all is an error here.
+func runConformance(options EmitOptions, packageDir string) (conformanceRun, error) {
+	directory := options.ConformanceDir
+	if directory == "" {
+		working, err := os.Getwd()
+		if err != nil {
+			return conformanceRun{}, fmt.Errorf("resolve conformance directory: %w", err)
+		}
+		directory = working
+	}
+
+	name := options.ConformanceCommand[0]
+	arguments := options.ConformanceCommand[1:]
+	stdout, stderr, exitStatus, err := runChecker(directory, name, arguments)
+	if err != nil {
+		return conformanceRun{}, fmt.Errorf("run conformance command %v: %w", options.ConformanceCommand, err)
+	}
+	if len(stdout) == 0 {
+		// An empty result blob would be packaged as conformance evidence that
+		// says nothing, which reads as evidence rather than as its absence.
+		diagnosis := strings.TrimSpace(string(stderr))
+		if diagnosis == "" {
+			diagnosis = "no diagnostic output"
+		}
+		return conformanceRun{}, fmt.Errorf("conformance command exited %d and produced no result: %s", exitStatus, diagnosis)
+	}
+
+	target := filepath.Join(packageDir, filepath.FromSlash(emitConformancePath))
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return conformanceRun{}, err
+	}
+	if err := os.WriteFile(target, stdout, 0o644); err != nil {
+		return conformanceRun{}, fmt.Errorf("write conformance result: %w", err)
+	}
+	return conformanceRun{exitStatus: exitStatus}, nil
+}
+
 func validateEmitOptions(options EmitOptions) error {
 	required := []struct {
 		name  string
@@ -504,7 +559,6 @@ func validateEmitOptions(options EmitOptions) error {
 		{"specification path", options.SpecPath},
 		{"corpus version", options.CorpusVersion},
 		{"corpus digest path", options.CorpusDigestPath},
-		{"conformance result path", options.ConformanceResultPath},
 		{"output directory", options.OutDir},
 	}
 	for _, field := range required {
@@ -523,9 +577,6 @@ func validateEmitOptions(options EmitOptions) error {
 	}
 	if len(options.ConformanceCommand) == 0 {
 		return fmt.Errorf("conformance command is required")
-	}
-	if options.ConformanceExitStatus < 0 {
-		return fmt.Errorf("conformance exit status must be non-negative")
 	}
 	if !packageTextPresent(options.Custody.Acquisition, options.Custody.Replay, options.Custody.Review, options.Custody.Issuance) {
 		return fmt.Errorf("verification custody fields are required")
