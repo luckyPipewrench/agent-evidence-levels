@@ -1,0 +1,115 @@
+{
+  "runs": [
+    {
+      "grade": 1,
+      "run": "run-ael1-valid",
+      "r": "pending",
+      "checks": {
+        "R": {
+          "status": "UV",
+          "message": "one or more activities lack replayable decisions"
+        },
+        "a": {
+          "status": "PASS",
+          "message": "all signatures verify over stored payload bytes"
+        },
+        "b": {
+          "status": "PASS",
+          "message": "all verified payloads are canonical"
+        },
+        "c": {
+          "status": "UV",
+          "message": "no byte-level modification was constructed for this artifact; corpus fixtures demonstrate rejection"
+        },
+        "d": {
+          "status": "PASS",
+          "message": "record sequence order strictly increases from seq 0"
+        },
+        "e": {
+          "status": "PASS",
+          "message": "each record links to the preceding presented record"
+        },
+        "f": {
+          "status": "PASS",
+          "message": "each recorder opens with hmax\u003e0"
+        },
+        "g": {
+          "status": "PASS",
+          "message": "sequence numbers are contiguous"
+        },
+        "h": {
+          "status": "PASS",
+          "message": "signed heartbeats are present when enabled and record spacing is within hmax+htol"
+        },
+        "i": {
+          "status": "PASS",
+          "message": "close commits to count and previous head"
+        },
+        "j": {
+          "status": "PASS",
+          "message": "closed or not claiming AEL-1 liveness"
+        },
+        "k": {
+          "status": "FAIL",
+          "message": "fewer than two recorders on the run"
+        },
+        "l": {
+          "status": "UV",
+          "message": "need two recorders to compare key custody"
+        },
+        "m": {
+          "status": "UV",
+          "message": "no covered event classes declared; omission-detection unverifiable"
+        },
+        "n": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "o": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "p": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "q": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "r": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "s": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "t": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "u": {
+          "status": "UV",
+          "message": "manifest anchor block is absent"
+        },
+        "v": {
+          "status": "UV",
+          "message": "manifest counterparty block is absent"
+        },
+        "w": {
+          "status": "PASS",
+          "message": "verified closed-schema objects satisfy required keys and have no unknown top-level keys outside ext"
+        }
+      },
+      "coverage": "declared-only",
+      "custody": "same-process",
+      "anchor": "none",
+      "retention": "30d/fixture",
+      "open": false,
+      "notes": [
+        "AEL-2 capped: check k is FAIL (fewer than two recorders on the run)"
+      ]
+    }
+  ]
+}

@@ -1001,32 +1001,39 @@ func isSHA256(value string) bool {
 func validatePackageBlobs(root string, manifest *PackageManifest) error {
 	declared := map[string]PackageBlob{}
 	for _, blob := range manifest.Files {
-		if err := validateBlobShape("file manifest entry", blob); err != nil {
+		name, err := normalizedPackageBlobPath("file manifest entry", blob)
+		if err != nil {
 			return err
 		}
-		if _, exists := declared[blob.Path]; exists {
-			return fmt.Errorf("file manifest lists %q more than once", blob.Path)
+		if _, exists := declared[name]; exists {
+			return fmt.Errorf("file manifest lists %q more than once", name)
 		}
-		declared[blob.Path] = blob
+		declared[name] = blob
 	}
+	verificationInputs := map[string]bool{}
 	for _, blob := range manifest.VerificationInputs {
-		if err := validateBlobShape("verification input", blob); err != nil {
+		name, err := normalizedPackageBlobPath("verification input", blob)
+		if err != nil {
 			return err
 		}
-		if _, ok := declared[blob.Path]; !ok {
-			return fmt.Errorf("verification input %q is absent from file manifest", blob.Path)
+		if verificationInputs[name] {
+			return fmt.Errorf("verification inputs list %q more than once", name)
 		}
+		verificationInputs[name] = true
 	}
-	for _, ref := range packageRequiredBlobs(manifest) {
-		file, ok := declared[ref.Path]
+	for _, ref := range packageReferencedBlobs(manifest) {
+		name, err := normalizedPackageBlobPath("referenced blob", ref)
+		if err != nil {
+			return err
+		}
+		file, ok := declared[name]
 		if !ok {
-			return fmt.Errorf("required blob %q is absent from file manifest", ref.Path)
+			return fmt.Errorf("referenced blob %q is absent from file manifest", name)
 		}
 		if file.Size != ref.Size || file.DigestAlgorithm != ref.DigestAlgorithm || file.Digest != ref.Digest {
-			return fmt.Errorf("required blob %q does not match file manifest", ref.Path)
+			return fmt.Errorf("referenced blob %q does not match file manifest", name)
 		}
 	}
-
 	actual := map[string]bool{}
 	err := filepath.WalkDir(root, func(file string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -1078,8 +1085,15 @@ func validatePackageBlobs(root string, manifest *PackageManifest) error {
 	return nil
 }
 
-func packageRequiredBlobs(manifest *PackageManifest) []PackageBlob {
-	return []PackageBlob{
+func normalizedPackageBlobPath(name string, blob PackageBlob) (string, error) {
+	if err := validateBlobShape(name, blob); err != nil {
+		return "", err
+	}
+	return path.Clean(blob.Path), nil
+}
+
+func packageReferencedBlobs(manifest *PackageManifest) []PackageBlob {
+	references := []PackageBlob{
 		manifest.ArtifactBinding.Manifest,
 		manifest.Checker.Executable,
 		manifest.ArtifactEvaluation.MachineOutput,
@@ -1087,6 +1101,7 @@ func packageRequiredBlobs(manifest *PackageManifest) []PackageBlob {
 		manifest.ArtifactEvaluation.Stderr,
 		manifest.Conformance.Result,
 	}
+	return append(references, manifest.VerificationInputs...)
 }
 
 func validatePackageInputKeys(root string, manifest *PackageManifest) error {
@@ -1156,11 +1171,12 @@ func validateArtifactBinding(root string, manifest *PackageManifest) error {
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(manifest.ArtifactBinding.Manifest.Path, manifest.ArtifactBinding.Root+"/") {
-		return fmt.Errorf("artifact manifest must be inside artifact root")
-	}
-	if !strings.HasSuffix(manifest.ArtifactBinding.Manifest.Path, "/manifest.json") {
-		return fmt.Errorf("artifact manifest must name manifest.json")
+	// The loader always reads <root>/manifest.json, so the DECLARED path must be
+	// exactly that file. A prefix-and-suffix pair accepted any nested manifest.json
+	// inside the root, which let a package declare and hash one file while the
+	// evaluation read a different one, leaving the digest binding nothing.
+	if manifest.ArtifactBinding.Manifest.Path != manifest.ArtifactBinding.Root+"/"+packageManifestName {
+		return fmt.Errorf("artifact manifest must be %q", manifest.ArtifactBinding.Root+"/"+packageManifestName)
 	}
 	art, err := LoadArtifact(artifactRoot, keysDir)
 	if err != nil {

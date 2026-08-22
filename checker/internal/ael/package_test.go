@@ -26,6 +26,32 @@ func TestPackageSchemaRejectsEvaluationGrades(t *testing.T) {
 	}
 }
 
+// TestArtifactBindingRequiresExactManifestPath guards the DECLARED artifact
+// manifest against the one actually evaluated. LoadArtifact always reads
+// <root>/manifest.json, so a declared path that merely sits inside the root and
+// ends in /manifest.json can name a different file: the package then hashes and
+// binds bytes that no evaluation ever reads.
+func TestArtifactBindingRequiresExactManifestPath(t *testing.T) {
+	for _, declared := range []string{
+		"artifact/nested/manifest.json",
+		"artifact/a/b/manifest.json",
+	} {
+		manifest := &PackageManifest{ArtifactBinding: PackageBinding{
+			Root:           "artifact",
+			KeysDir:        "inputs/keys",
+			Manifest:       PackageBlob{Path: declared},
+			DiscoveredRuns: []string{"run-1"},
+		}}
+		err := validateArtifactBinding(t.TempDir(), manifest)
+		// Assert the exact required path, not just the message stem. Checking only
+		// the stem would pass even if the code demanded the WRONG path, which makes
+		// the guard look tested while testing nothing about which file it binds.
+		if err == nil || !strings.Contains(err.Error(), `artifact manifest must be "artifact/manifest.json"`) {
+			t.Fatalf("declared %q: error = %v, want rejection naming the exact manifest path", declared, err)
+		}
+	}
+}
+
 func TestValidatePackagePathRejectsEscape(t *testing.T) {
 	if err := validatePackagePath("../escape"); err == nil {
 		t.Fatal("path escape was accepted")
