@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -183,6 +184,72 @@ func TestEmitRecordsNonconformingRun(t *testing.T) {
 	}
 }
 
+// TestEmitSelectedRunStillBindsAllDiscoveredRuns makes the favorable run in a
+// mixed artifact the selected one. The package remains bound to both it and
+// the degraded run, so selection cannot omit the unfavorable evidence.
+func TestEmitSelectedRunStillBindsAllDiscoveredRuns(t *testing.T) {
+	harness := newEmitHarness(t, "multi_run/mixed")
+	harness.options.Run = "run-mixed-a"
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
+	if err != nil {
+		t.Fatalf("validate emitted package: %v", err)
+	}
+	if validation.DisplayState != "EVALUATED" {
+		t.Errorf("display state = %q, want EVALUATED", validation.DisplayState)
+	}
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ael.PackageManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Run != "run-mixed-a" {
+		t.Errorf("selected run = %q, want run-mixed-a", manifest.Run)
+	}
+	wantRuns := []string{"run-mixed-a", "run-mixed-b"}
+	if len(manifest.ArtifactBinding.DiscoveredRuns) != len(wantRuns) {
+		t.Fatalf("discovered runs = %v, want %v", manifest.ArtifactBinding.DiscoveredRuns, wantRuns)
+	}
+	for index, want := range wantRuns {
+		if manifest.ArtifactBinding.DiscoveredRuns[index] != want {
+			t.Errorf("discovered run %d = %q, want %q", index, manifest.ArtifactBinding.DiscoveredRuns[index], want)
+		}
+	}
+}
+
+// TestEmitRefusesCheckerExitDisagreement confirms that the JSON and human
+// views cannot record contradictory process conclusions under one package.
+func TestEmitRefusesCheckerExitDisagreement(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	checker := filepath.Join(t.TempDir(), "disagreeing-checker")
+	const script = `#!/bin/sh
+if [ "$1" = "--json" ]; then
+  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
+  exit 0
+fi
+printf 'human invocation failed\n' >&2
+exit 7
+`
+	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.CheckerPath = checker
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
+		t.Fatal("emit accepted disagreeing checker exits")
+	} else if indexOf(err.Error(), "checker is not reproducible") < 0 {
+		t.Errorf("emit rejected checker for the wrong reason: %v", err)
+	}
+	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
+		t.Errorf("failed emit left a partial package behind: %v", err)
+	}
+}
+
 func containsToken(raw []byte, token string) bool {
 	return len(raw) > 0 && len(token) > 0 && indexOf(string(raw), token) >= 0
 }
@@ -255,6 +322,59 @@ func TestEmitRefusesOutputInsideArtifact(t *testing.T) {
 	}
 }
 
+// TestEmitRefusesSymlinkedOutputInsideArtifact attacks the overlap guard with
+// a lexical path outside the artifact whose parent symlink resolves inside it.
+// Checking only filepath.Abs leaves this form of the recursive-copy bug open.
+func TestEmitRefusesSymlinkedOutputInsideArtifact(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	artifactCopy := filepath.Join(t.TempDir(), "artifact")
+	copyEmitArtifact(t, harness.options.ArtifactDir, artifactCopy)
+
+	link := filepath.Join(t.TempDir(), "artifact-link")
+	if err := os.Symlink(artifactCopy, link); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ArtifactDir = artifactCopy
+	harness.options.ArtifactKeysDir = filepath.Join(artifactCopy, "keys")
+	harness.options.OutDir = filepath.Join(link, "package")
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
+		t.Fatal("emit accepted an output directory symlinked inside the artifact")
+	} else if indexOf(err.Error(), "output directory") < 0 {
+		t.Errorf("emit did not reject the symlinked overlap before copying: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(artifactCopy, "package")); !os.IsNotExist(err) {
+		t.Errorf("emit created the output directory before refusing: %v", err)
+	}
+}
+
+func copyEmitArtifact(t *testing.T, source, destination string) {
+	t.Helper()
+	if err := filepath.WalkDir(source, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, raw, 0o644)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestEmitRemovesPartialPackageOnFailure covers debris found by probing: a
 // refused copy used to leave a half-written package behind, so the operator's
 // retry failed a second time on a directory that was no longer empty.
@@ -291,4 +411,160 @@ func TestEmitReportsCheckerDiagnosis(t *testing.T) {
 	if indexOf(err.Error(), "manifest.json") < 0 {
 		t.Errorf("error does not carry the checker's diagnosis: %v", err)
 	}
+}
+
+// TestEmitRefusesCheckerThatMutatesPackageInput proves the digest in the
+// emitted manifest names the executable that actually produced the result. A
+// checker that rewrites itself after its machine-readable run would otherwise
+// leave a valid package whose captured result came from different bytes than
+// its signed checker blob.
+func TestEmitRefusesCheckerThatMutatesPackageInput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	checker := filepath.Join(t.TempDir(), "self-mutating-checker")
+	const script = `#!/bin/sh
+if [ "$1" = "--json" ]; then
+  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
+  cat > "$0" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--json" ]; then
+  printf '{"runs":[{"run":"run-ael1-valid","changed":true}]}\n'
+else
+  printf 'changed checker\n'
+fi
+EOF
+  chmod 755 "$0"
+else
+  printf 'original checker\n'
+fi
+`
+	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.CheckerPath = checker
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
+		t.Fatal("emit accepted a checker that changed after producing its report")
+	} else if indexOf(err.Error(), "checker changed package input") < 0 {
+		t.Errorf("emit rejected the checker for the wrong reason: %v", err)
+	}
+	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
+		t.Errorf("failed emit left a partial package behind: %v", err)
+	}
+}
+
+// TestEmitBindsCopiedSpecAndInitialCorpusDigest makes the checker mutate the
+// caller's external sources after they have been copied. The package must bind
+// its bundled specification and the corpus identity observed before execution,
+// not bytes changed by the subprocess after the evaluation began.
+func TestEmitBindsCopiedSpecAndInitialCorpusDigest(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	originalCorpus, err := os.ReadFile(harness.options.CorpusDigestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(t.TempDir(), "mutating-external-source-checker")
+	const script = `#!/bin/sh
+if [ "$1" = "--json" ]; then
+  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
+  printf 'changed specification\n' > "$AEL_EMIT_TEST_SPEC"
+  printf 'changed corpus\n' > "$AEL_EMIT_TEST_CORPUS"
+else
+  printf 'checker output\n'
+fi
+`
+	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEL_EMIT_TEST_SPEC", harness.options.SpecPath)
+	t.Setenv("AEL_EMIT_TEST_CORPUS", harness.options.CorpusDigestPath)
+	harness.options.CheckerPath = checker
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ael.PackageManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	bundledSpecDigest, err := digestFile(filepath.Join(harness.options.OutDir, "inputs", "specification.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Spec.Digest != bundledSpecDigest {
+		t.Errorf("spec digest = %s, want digest of bundled specification %s", manifest.Spec.Digest, bundledSpecDigest)
+	}
+	corpusSum := sha256.Sum256(originalCorpus)
+	wantCorpusDigest := hex.EncodeToString(corpusSum[:])
+	if manifest.Conformance.Corpus.Digest != wantCorpusDigest {
+		t.Errorf("corpus digest = %s, want pre-execution digest %s", manifest.Conformance.Corpus.Digest, wantCorpusDigest)
+	}
+}
+
+// TestEmitPublishesOnlyAfterCheckerCompletes ensures a checker cannot observe
+// or mutate the requested destination while the package is still being
+// assembled and signed.
+func TestEmitPublishesOnlyAfterCheckerCompletes(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	checker := filepath.Join(t.TempDir(), "output-visibility-checker")
+	marker := filepath.Join(t.TempDir(), "output-state")
+	const script = `#!/bin/sh
+if [ -e "$AEL_EMIT_TEST_OUT" ]; then
+  printf 'visible\n' > "$AEL_EMIT_TEST_MARKER"
+else
+  printf 'hidden\n' > "$AEL_EMIT_TEST_MARKER"
+fi
+if [ "$1" = "--json" ]; then
+  printf '{"runs":[{"run":"run-ael1-valid"}]}\n'
+else
+  printf 'checker output\n'
+fi
+`
+	if err := os.WriteFile(checker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEL_EMIT_TEST_OUT", harness.options.OutDir)
+	t.Setenv("AEL_EMIT_TEST_MARKER", marker)
+	harness.options.CheckerPath = checker
+
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	state, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(state) != "hidden\n" {
+		t.Errorf("output was %q while checker ran, want hidden", state)
+	}
+	if _, err := os.Stat(harness.options.OutDir); err != nil {
+		t.Errorf("completed package was not published: %v", err)
+	}
+}
+
+// TestEmitPublishesIntoEmptyRequestedDirectory preserves the documented
+// convenience form while still replacing the placeholder atomically.
+func TestEmitPublishesIntoEmptyRequestedDirectory(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	if err := os.MkdirAll(harness.options.OutDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(harness.options.OutDir, "manifest.json")); err != nil {
+		t.Errorf("published package has no manifest: %v", err)
+	}
+}
+
+func digestFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }

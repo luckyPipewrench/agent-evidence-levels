@@ -119,23 +119,17 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, err
 	}
 
-	packageDir := options.OutDir
-	if err := os.MkdirAll(packageDir, 0o755); err != nil {
-		return EmitResult{}, fmt.Errorf("create package directory: %w", err)
-	}
-	if empty, err := directoryIsEmpty(packageDir); err != nil {
+	// Assemble privately, then atomically publish the completed signed tree.
+	// Writing directly to --out leaves a window after the checker has finished
+	// where another local writer can alter bytes before their digests are signed.
+	packageDir, err := createEmitStagingDir(options.OutDir)
+	if err != nil {
 		return EmitResult{}, err
-	} else if !empty {
-		// Emitting into a populated directory would let unrelated files be
-		// swept into the signed file list, so the signature would cover bytes
-		// the operator never chose to publish.
-		return EmitResult{}, fmt.Errorf("package directory %q is not empty", packageDir)
 	}
 
-	// A failed emit removes its own debris. The directory was verified empty
-	// just above, so everything inside it is ours. Leaving a half-written
-	// package behind turns one clear failure into a second, confusing one when
-	// the retry reports a directory that is no longer empty.
+	// A failed emit removes only the private staging directory. Leaving a
+	// half-written package behind turns one clear failure into a second,
+	// confusing one when the retry reports a directory that is no longer empty.
 	succeeded := false
 	defer func() {
 		if !succeeded {
@@ -173,8 +167,25 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := copyFile(options.ConformanceResultPath, filepath.Join(packageDir, filepath.FromSlash(emitConformancePath)), 0o644); err != nil {
 		return EmitResult{}, fmt.Errorf("copy conformance result: %w", err)
 	}
+	// The corpus identity lives outside the package, so capture its declared
+	// digest before the checker runs. A later read could otherwise bind a source
+	// file modified by the subprocess rather than the identity selected for this
+	// evaluation.
+	corpusDigest, err := fileDigest(options.CorpusDigestPath)
+	if err != nil {
+		return EmitResult{}, fmt.Errorf("digest corpus: %w", err)
+	}
 
-	evaluation, err := runEmitEvaluation(packageDir, checkerRelative)
+	// The checker runs inside the package so its relative replay arguments are
+	// literal. Snapshot every input after assembly and reject any persistent
+	// mutation from either invocation: otherwise the manifest could digest a
+	// replacement binary or artifact rather than the bytes that produced its
+	// recorded result.
+	inputs, err := packageFileBlobs(packageDir)
+	if err != nil {
+		return EmitResult{}, err
+	}
+	evaluation, err := runEmitEvaluation(packageDir, checkerRelative, inputs)
 	if err != nil {
 		return EmitResult{}, err
 	}
@@ -201,13 +212,11 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 		return EmitResult{}, fmt.Errorf("requested run %q is not among discovered runs %v", run, discovered)
 	}
 
-	specDigest, err := fileDigest(options.SpecPath)
+	// Bind the specification bytes actually shipped in the package, not a
+	// caller-side source file that could have changed after the copy.
+	specDigest, err := fileDigest(filepath.Join(packageDir, filepath.FromSlash(emitSpecPath)))
 	if err != nil {
 		return EmitResult{}, fmt.Errorf("digest specification: %w", err)
-	}
-	corpusDigest, err := fileDigest(options.CorpusDigestPath)
-	if err != nil {
-		return EmitResult{}, fmt.Errorf("digest corpus: %w", err)
 	}
 
 	files, err := packageFileBlobs(packageDir)
@@ -311,10 +320,13 @@ func EmitEvaluationPackage(options EmitOptions) (EmitResult, error) {
 	if err := writeSignedManifest(packageDir, manifest, options.OperatorKey); err != nil {
 		return EmitResult{}, err
 	}
+	if err := publishEmitPackage(packageDir, options.OutDir); err != nil {
+		return EmitResult{}, err
+	}
 
 	succeeded = true
 	return EmitResult{
-		PackageDir:     packageDir,
+		PackageDir:     options.OutDir,
 		PackageID:      options.PackageID,
 		Run:            run,
 		DiscoveredRuns: discovered,
@@ -337,7 +349,7 @@ type emitEvaluation struct {
 // the same bytes, so a disagreement means the evaluation is not reproducible,
 // and a package asserting one of two possible outcomes would be a false record.
 // Refusing is the honest direction even though it costs availability.
-func runEmitEvaluation(packageDir, checkerRelative string) (emitEvaluation, error) {
+func runEmitEvaluation(packageDir, checkerRelative string, inputs []PackageBlob) (emitEvaluation, error) {
 	checker := "./" + checkerRelative
 
 	machineArgs := []string{"--json", "--keys", emitKeysDir, emitArtifactDir}
@@ -345,10 +357,16 @@ func runEmitEvaluation(packageDir, checkerRelative string) (emitEvaluation, erro
 	if err != nil {
 		return emitEvaluation{}, err
 	}
+	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
+		return emitEvaluation{}, err
+	}
 
 	humanArgs := []string{"--keys", emitKeysDir, emitArtifactDir}
 	humanStdout, _, humanExit, err := runChecker(packageDir, checker, humanArgs)
 	if err != nil {
+		return emitEvaluation{}, err
+	}
+	if err := assertPackageInputsUnchanged(packageDir, inputs); err != nil {
 		return emitEvaluation{}, err
 	}
 	if machineExit != humanExit {
@@ -409,7 +427,7 @@ func runChecker(dir, checker string, args []string) (stdout, stderr []byte, exit
 // such as --out ./package while standing in the artifact directory, so the
 // overlap is rejected before any copying starts.
 func validateEmitPaths(options EmitOptions) error {
-	out, err := filepath.Abs(options.OutDir)
+	out, err := resolveEmitPath(options.OutDir)
 	if err != nil {
 		return fmt.Errorf("resolve output directory: %w", err)
 	}
@@ -420,7 +438,7 @@ func validateEmitPaths(options EmitOptions) error {
 		{"artifact directory", options.ArtifactDir},
 		{"artifact keys directory", options.ArtifactKeysDir},
 	} {
-		resolved, err := filepath.Abs(input.path)
+		resolved, err := resolveEmitPath(input.path)
 		if err != nil {
 			return fmt.Errorf("resolve %s: %w", input.name, err)
 		}
@@ -432,6 +450,40 @@ func validateEmitPaths(options EmitOptions) error {
 		}
 	}
 	return nil
+}
+
+// resolveEmitPath resolves every existing path component while retaining a
+// possible final path that has not been created yet. filepath.Abs alone is a
+// lexical operation, so it misses an output such as outside-link/package when
+// outside-link resolves into the artifact being copied.
+func resolveEmitPath(value string) (string, error) {
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	probe := abs
+	var missing []string
+	for {
+		if _, err := os.Lstat(probe); err == nil {
+			resolved, err := filepath.EvalSymlinks(probe)
+			if err != nil {
+				return "", err
+			}
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return resolved, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return "", fmt.Errorf("no existing parent for %q", value)
+		}
+		missing = append(missing, filepath.Base(probe))
+		probe = parent
+	}
 }
 
 // pathWithin reports whether candidate is ancestor itself or lives beneath it.
@@ -582,6 +634,30 @@ func packageFileBlobs(packageDir string) ([]PackageBlob, error) {
 	return blobs, nil
 }
 
+// assertPackageInputsUnchanged rejects any persistent change to the copied
+// artifact, inputs, or checker across an invocation. The checker produces its
+// streams through pipes; a package-tree change visible after it exits means the
+// recorded evaluation no longer has one stable set of input bytes to bind and
+// must not be signed.
+func assertPackageInputsUnchanged(packageDir string, expected []PackageBlob) error {
+	actual, err := packageFileBlobs(packageDir)
+	if err != nil {
+		return err
+	}
+	for index := 0; index < len(expected) || index < len(actual); index++ {
+		if index == len(expected) {
+			return fmt.Errorf("checker added package input %q", actual[index].Path)
+		}
+		if index == len(actual) {
+			return fmt.Errorf("checker removed package input %q", expected[index].Path)
+		}
+		if expected[index] != actual[index] {
+			return fmt.Errorf("checker changed package input %q", expected[index].Path)
+		}
+	}
+	return nil
+}
+
 func fileDigest(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -597,6 +673,65 @@ func directoryIsEmpty(dir string) (bool, error) {
 		return false, err
 	}
 	return len(entries) == 0, nil
+}
+
+// createEmitStagingDir prepares the requested destination without making a
+// partial package visible there. The staging directory is a private sibling so
+// publication can use an atomic same-filesystem rename.
+func createEmitStagingDir(out string) (string, error) {
+	parent := filepath.Dir(out)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("create package parent: %w", err)
+	}
+	if info, err := os.Stat(out); err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("package directory %q is not a directory", out)
+		}
+		empty, err := directoryIsEmpty(out)
+		if err != nil {
+			return "", err
+		}
+		if !empty {
+			// Emitting into a populated directory would let unrelated files be
+			// swept into the signed file list, so the signature would cover bytes
+			// the operator never chose to publish.
+			return "", fmt.Errorf("package directory %q is not empty", out)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect package directory: %w", err)
+	}
+	stage, err := os.MkdirTemp(parent, "."+filepath.Base(out)+".aelpackage-")
+	if err != nil {
+		return "", fmt.Errorf("create package staging directory: %w", err)
+	}
+	return stage, nil
+}
+
+// publishEmitPackage replaces only an empty requested destination with the
+// completed signed staging tree. Staging lives under the same parent, so the
+// rename is atomic and a consumer sees either no package or a complete one.
+func publishEmitPackage(stage, out string) error {
+	if err := os.Chmod(stage, 0o755); err != nil {
+		return fmt.Errorf("set package directory mode: %w", err)
+	}
+	if _, err := os.Lstat(out); err == nil {
+		empty, err := directoryIsEmpty(out)
+		if err != nil {
+			return fmt.Errorf("inspect package directory before publish: %w", err)
+		}
+		if !empty {
+			return fmt.Errorf("package directory %q became non-empty before publish", out)
+		}
+		if err := os.Remove(out); err != nil {
+			return fmt.Errorf("clear empty package directory before publish: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect package directory before publish: %w", err)
+	}
+	if err := os.Rename(stage, out); err != nil {
+		return fmt.Errorf("publish package: %w", err)
+	}
+	return nil
 }
 
 func copyFile(source, destination string, mode fs.FileMode) error {
