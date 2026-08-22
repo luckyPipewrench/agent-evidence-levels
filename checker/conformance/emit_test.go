@@ -508,7 +508,7 @@ fi
 
 	if _, err := ael.EmitEvaluationPackage(harness.options); err == nil {
 		t.Fatal("emit accepted a checker that changed after producing its report")
-	} else if indexOf(err.Error(), "checker changed package input") < 0 {
+	} else if indexOf(err.Error(), "changed package input") < 0 {
 		t.Errorf("emit rejected the checker for the wrong reason: %v", err)
 	}
 	if _, err := os.Stat(harness.options.OutDir); !os.IsNotExist(err) {
@@ -688,5 +688,133 @@ func TestEmitCapturesConformanceOutput(t *testing.T) {
 	}
 	if indexOf(string(raw), `"result":"pass"`) < 0 {
 		t.Errorf("packaged conformance result is not the command's output: %q", raw)
+	}
+}
+
+// TestEmitRefusesConformanceThatMutatesPackageInput closes an ordering hole.
+// The input snapshot was taken AFTER the conformance command ran, so the
+// mutation guard covered the checker and not conformance: anything the
+// conformance command changed was already baked into the digests that get
+// signed. The command runs with the emitter's privileges, so this is reachable
+// by a buggy suite as easily as a hostile one.
+func TestEmitRefusesConformanceThatMutatesPackageInput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+
+	// A conformance command that reaches into the staging directory and
+	// rewrites a packaged artifact input while emission is still running.
+	script := filepath.Join(t.TempDir(), "mutating-conformance.sh")
+	parent := filepath.Dir(harness.options.OutDir)
+	base := filepath.Base(harness.options.OutDir)
+	body := "#!/bin/sh\n" +
+		"for stage in " + parent + "/." + base + ".aelpackage-*; do\n" +
+		"  if [ -d \"$stage/artifact\" ]; then\n" +
+		"    printf 'mutated\\n' >> \"$stage/artifact/manifest.json\"\n" +
+		"  fi\n" +
+		"done\n" +
+		"printf '{\"result\":\"pass\"}\\n'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted a conformance command that rewrote a packaged input")
+	}
+	if indexOf(err.Error(), "changed package input") < 0 {
+		t.Errorf("error does not name the input mutation: %v", err)
+	}
+	if _, statErr := os.Stat(harness.options.OutDir); !os.IsNotExist(statErr) {
+		t.Errorf("a refused emit published a package: %v", statErr)
+	}
+}
+
+// TestEmitBoundsConformanceOutput holds the limit that keeps a runaway
+// conformance command from taking emission down with it. The capture becomes
+// signed evidence, so it errors rather than truncating: a clipped conformance
+// report can still parse, and the package would then carry evidence that reads
+// as complete while describing a partial run.
+func TestEmitBoundsConformanceOutput(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	script := filepath.Join(t.TempDir(), "flooding-conformance.sh")
+	// Emit far past the stdout ceiling.
+	body := "#!/bin/sh\nexec yes ael-flood\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	if err == nil {
+		t.Fatal("emit accepted unbounded conformance output")
+	}
+	if indexOf(err.Error(), "more output than the emitter accepts") < 0 {
+		t.Errorf("error does not name the output limit: %v", err)
+	}
+}
+
+// TestEmitBoundsConformanceRuntime holds the deadline. A conformance process
+// that waits forever would otherwise block emission with no way out.
+func TestEmitBoundsConformanceRuntime(t *testing.T) {
+	harness := newEmitHarness(t, "ael1/valid")
+	script := filepath.Join(t.TempDir(), "hanging-conformance.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 300\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.options.ConformanceCommand = []string{script}
+	harness.options.CommandTimeout = 2 * time.Second
+
+	start := time.Now()
+	_, err := ael.EmitEvaluationPackage(harness.options)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("emit accepted a conformance command that never finishes")
+	}
+	if elapsed > 60*time.Second {
+		t.Errorf("emit waited %v, so the deadline did not apply", elapsed)
+	}
+}
+
+// TestEmitRunsConformanceWithoutAShell records the trust boundary for executing
+// a conformance command, because "the emitter runs a command" invites the
+// reading that it is a shell-injection surface. It is not one.
+//
+// The command is passed as an argv vector to exec, with no shell between the
+// caller and the process, so metacharacters arrive at the program as literal
+// argument bytes rather than being interpreted. The command also reaches the
+// emitter only as an operator flag: it is never read from the artifact, the
+// package, or any file the evaluated subject can write.
+//
+// That leaves the operator, who already supplies the checker executable this
+// command runs beside. An operator who can choose what the emitter executes can
+// already execute anything as themselves, so refusing to run the conformance
+// command would remove no capability they lack, while reintroducing the
+// declared-conformance contradiction this package exists to close.
+func TestEmitRunsConformanceWithoutAShell(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "shell-probe-must-not-exist")
+	script := filepath.Join(t.TempDir(), "argv-conformance.sh")
+	body := "#!/bin/sh\nprintf '{\"result\":\"pass\",\"argument\":\"%s\"}\\n' \"$1\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// If any shell interpreted this, the substitution runs and the probe appears.
+	hostile := "$(touch " + probe + ")"
+
+	harness := newEmitHarness(t, "ael1/valid")
+	harness.options.ConformanceCommand = []string{script, hostile}
+	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Fatalf("a shell interpreted the conformance argument and ran the substitution: %v", err)
+	}
+	packaged, err := os.ReadFile(filepath.Join(harness.options.OutDir, "results", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(packaged), hostile) {
+		t.Errorf("the argument did not reach the process literally: %q", packaged)
 	}
 }

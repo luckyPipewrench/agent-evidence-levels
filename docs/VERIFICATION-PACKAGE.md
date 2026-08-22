@@ -52,6 +52,15 @@ The conformance command is run, not described. Its stdout becomes the packaged c
 
 `aelgen --report --json` produces that result: a machine-readable corpus report on stdout, diagnostics on stderr, and status 3 when any case disagrees with its expectation.
 
+The emitter executes that command, so the trust boundary is worth stating plainly. It runs as an
+argv vector with no shell, so metacharacters reach the program as literal argument bytes. It
+arrives only as an operator flag and is never read from the artifact, the package, or any file the
+evaluated subject can write. It runs beside the checker executable the operator also supplies, so
+an operator who can choose what the emitter executes could already execute anything as themselves.
+Every subprocess the emitter runs is bounded: output is capped, a deadline applies, the process
+group is signalled on cancellation so a wrapper cannot leave a child holding the pipe, and a run
+that changes any packaged input is refused before signing.
+
 The custody and coverage flags are declarations the operator makes and then signs, so they have no
 defaults and the command refuses to run without them. A disclosure claim in particular is something
 no command can observe on the operator's behalf.
