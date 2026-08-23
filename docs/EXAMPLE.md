@@ -32,7 +32,7 @@ bytes are canonical. Signature first, canonicality second: it never re-serialize
 
 ## 3. Run the checker
 
-```
+```sh
 make build
 ./bin/aelcheck --keys fixtures/ael1/valid/keys fixtures/ael1/valid
 ```
@@ -86,7 +86,7 @@ The output directory must be absent or empty. Use a new directory, or remove the
 ```sh
 ./bin/aelpackage emit \
   --artifact fixtures/ael1/valid --artifact-keys fixtures/ael1/valid/keys \
-  --checker ./bin/aelcheck --source-revision "$(git rev-parse --short HEAD)" \
+  --checker ./bin/aelcheck --source-revision "$(git rev-parse HEAD)" \
   --operator-key ./example/operator.key --operator-id example-operator --producer-id example-producer \
   --status-authority-id example-status --status-key ./example/status.pub \
   --spec SPEC.md --spec-version 0.1 --corpus-digest-source fixtures/CASES.txt --corpus-version fixtures \
