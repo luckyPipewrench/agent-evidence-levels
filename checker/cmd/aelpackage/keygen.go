@@ -62,6 +62,10 @@ func generateTrustKeypair(role, trustRoot string, random io.Reader) (keygenResul
 	if err != nil {
 		return keygenResult{}, err
 	}
+	// These symlink checks guard against a mispointed or previously tampered
+	// trust root. They are check-then-use and therefore not a defense against
+	// a concurrent attacker who can already write to the path's parents; such
+	// an attacker owns the trust store outright.
 	cleanRoot := filepath.Clean(trustRoot)
 	if info, err := os.Lstat(cleanRoot); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
@@ -118,36 +122,16 @@ func keygenRoleDirectory(role string) (string, error) {
 }
 
 func writeKeyFileExclusive(path string, content []byte, mode os.FileMode) error {
-	// Reserve the final path exclusively so an existing key is never overwritten,
-	// then write the bytes to a temp file and rename it over the reservation so a
-	// concurrent reader never observes a partially written key.
-	reservation, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		if os.IsExist(err) {
-			return fmt.Errorf("refusing to overwrite existing key file %s", path)
-		}
-		return err
-	}
-	if err := reservation.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	written := false
-	defer func() {
-		if !written {
-			_ = os.Remove(path)
-		}
-	}()
-	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	// Write the bytes to a private temp file, then hard-link it into place.
+	// link(2) is atomic and never replaces an existing name, so an existing
+	// key can never be overwritten and no reader can ever observe an empty or
+	// partially written key file at the destination path.
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
 	tempPath := temp.Name()
-	defer func() {
-		if !written {
-			_ = os.Remove(tempPath)
-		}
-	}()
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(mode); err != nil {
 		_ = temp.Close()
 		return err
@@ -163,9 +147,11 @@ func writeKeyFileExclusive(path string, content []byte, mode os.FileMode) error 
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := os.Link(tempPath, path); err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("refusing to overwrite existing key file %s", path)
+		}
 		return err
 	}
-	written = true
 	return nil
 }
