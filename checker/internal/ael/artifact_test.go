@@ -9,6 +9,25 @@ import (
 	"testing"
 )
 
+func TestLoadArtifactRejectsUnsupportedAELFormat(t *testing.T) {
+	for _, format := range []string{"0", "2"} {
+		t.Run("ael_format "+format, func(t *testing.T) {
+			dir := t.TempDir()
+			raw := `{"ael_format":` + format + `,"recorders":[],"runs":["run-a"]}`
+			if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadArtifact(dir, filepath.Join(dir, "keys"))
+			if err == nil {
+				t.Fatal("LoadArtifact accepted an unsupported ael_format")
+			}
+			if !strings.Contains(err.Error(), "unsupported ael_format "+format) {
+				t.Fatalf("error %q does not name the unsupported format", err.Error())
+			}
+		})
+	}
+}
+
 func TestLoadArtifactRejectsNonCanonicalManifest(t *testing.T) {
 	tests := []struct {
 		name string

@@ -173,6 +173,13 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	if art.ManifestErr != nil {
 		return nil, fmt.Errorf("manifest: %w", art.ManifestErr)
 	}
+	// Fail closed on any format this checker does not implement. Without this,
+	// an artifact declaring a future ael_format would be evaluated under
+	// format-1 semantics and exit 0, which silently misgrades it.
+	if art.Manifest.AELFormat != ArtifactFormatVersion {
+		return nil, fmt.Errorf("manifest: unsupported ael_format %d; this checker implements ael_format %d",
+			art.Manifest.AELFormat, ArtifactFormatVersion)
+	}
 
 	for _, rec := range art.Manifest.Recorders {
 		log, err := loadRecorderLog(dir, rec)
