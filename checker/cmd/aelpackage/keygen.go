@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -61,7 +62,15 @@ func generateTrustKeypair(role, trustRoot string, random io.Reader) (keygenResul
 	if err != nil {
 		return keygenResult{}, err
 	}
-	privatePath := filepath.Join(filepath.Dir(filepath.Clean(trustRoot)), role+".key")
+	cleanRoot := filepath.Clean(trustRoot)
+	if info, err := os.Lstat(cleanRoot); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return keygenResult{}, fmt.Errorf("trust root %s must be a real directory, not a symlink", cleanRoot)
+		}
+	} else if !os.IsNotExist(err) {
+		return keygenResult{}, fmt.Errorf("inspect trust root: %w", err)
+	}
+	privatePath := filepath.Join(filepath.Dir(cleanRoot), role+".key")
 
 	public, private, err := ed25519.GenerateKey(random)
 	if err != nil {
@@ -87,7 +96,7 @@ func generateTrustKeypair(role, trustRoot string, random io.Reader) (keygenResul
 	publicText := []byte(base64.StdEncoding.EncodeToString(public) + "\n")
 	if err := writeKeyFileExclusive(publicPath, publicText, 0o644); err != nil {
 		if cleanupErr := os.Remove(privatePath); cleanupErr != nil {
-			return keygenResult{}, fmt.Errorf("write public key: %v; remove incomplete private key: %w", err, cleanupErr)
+			return keygenResult{}, fmt.Errorf("write public key and remove incomplete private key: %w", errors.Join(err, cleanupErr))
 		}
 		return keygenResult{}, fmt.Errorf("write public key: %w", err)
 	}
@@ -109,11 +118,18 @@ func keygenRoleDirectory(role string) (string, error) {
 }
 
 func writeKeyFileExclusive(path string, content []byte, mode os.FileMode) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	// Reserve the final path exclusively so an existing key is never overwritten,
+	// then write the bytes to a temp file and rename it over the reservation so a
+	// concurrent reader never observes a partially written key.
+	reservation, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("refusing to overwrite existing key file %s", path)
 		}
+		return err
+	}
+	if err := reservation.Close(); err != nil {
+		_ = os.Remove(path)
 		return err
 	}
 	written := false
@@ -122,11 +138,32 @@ func writeKeyFileExclusive(path string, content []byte, mode os.FileMode) error 
 			_ = os.Remove(path)
 		}
 	}()
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	if err := file.Close(); err != nil {
+	tempPath := temp.Name()
+	defer func() {
+		if !written {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(content); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
 		return err
 	}
 	written = true

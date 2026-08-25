@@ -112,6 +112,33 @@ func TestGenerateTrustKeypairRefusesOverwrite(t *testing.T) {
 	}
 }
 
+func TestGenerateTrustKeypairRejectsSymlinkedTrustRoot(t *testing.T) {
+	base := t.TempDir()
+	realRoot := filepath.Join(base, "real-trust")
+	if err := os.MkdirAll(realRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkRoot := filepath.Join(base, "trust-link")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := generateTrustKeypair("operator", linkRoot, bytes.NewReader(bytes.Repeat([]byte{0x42}, 64)))
+	if err == nil || !strings.Contains(err.Error(), "must be a real directory, not a symlink") {
+		t.Fatalf("symlinked trust root error = %v, want rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(base, "operator.key")); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected generation left a private key: %v", statErr)
+	}
+	entries, readErr := os.ReadDir(realRoot)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected generation wrote into the symlink target: %v", entries)
+	}
+}
+
 func TestGenerateTrustKeypairRemovesPrivateKeyWhenPublicExists(t *testing.T) {
 	trustRoot := filepath.Join(t.TempDir(), "trust")
 	randomBytes := bytes.Repeat([]byte{0x54}, 64)
