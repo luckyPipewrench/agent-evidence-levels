@@ -37,6 +37,12 @@ standard.
   later specification may supersede that result under a relying policy, but must
   not silently rewrite the historical evaluation.
 
+## Next version
+
+The next incompatible artifact-format version will remove the deprecated
+`claimed_rung` producer hint. It remains in v0.1 for artifact compatibility and
+the checker continues to ignore it.
+
 ## Donation target
 
 The current editor may publish v0.x under this repository. The intended

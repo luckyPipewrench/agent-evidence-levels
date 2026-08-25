@@ -569,7 +569,7 @@ func writePackageFixture(root, name, kind, artifactCase string, discoveredRuns [
 		"artifact_binding":     map[string]any{"root": "artifact", "keys_dir": "inputs/keys", "manifest": artifactManifest, "discovered_runs": stringsToAny(discoveredRuns)},
 		"files":                mapsToAny(files),
 		"verification_inputs":  inputs,
-		"spec":                 map[string]any{"version": "0.1", "digest_algorithm": "sha-256", "digest": shaHex([]byte("fixture specification"))},
+		"spec":                 map[string]any{"version": ael.SpecificationVersion, "digest_algorithm": "sha-256", "digest": shaHex([]byte("fixture specification"))},
 		"checker":              map[string]any{"name": "aelcheck", "source_revision": "fixture-revision", "executable": executable},
 		"artifact_evaluation":  map[string]any{"arguments": []any{"--json", "artifact"}, "exit_status": 0, "machine_output": machineOutput, "stdout": stdout, "stderr": stderr},
 		"conformance":          map[string]any{"corpus": map[string]any{"version": "fixture-corpus", "digest_algorithm": "sha-256", "digest": shaHex([]byte("fixture corpus"))}, "command": []any{"make", "check"}, "exit_status": 0, "result": corpusResult},
@@ -2034,7 +2034,7 @@ func writeCase(root string, c caseDef, pub ed25519.PublicKey, fp string) error {
 		custody = "same-process"
 	}
 	manifestMap := map[string]any{
-		"ael_format":   1,
+		"ael_format":   ael.ArtifactFormatVersion,
 		"claimed_rung": claimedExpectedRung(c.expect),
 		"coverage":     coverage,
 		"custody":      custody,

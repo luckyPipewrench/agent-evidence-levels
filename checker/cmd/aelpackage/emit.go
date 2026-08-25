@@ -41,7 +41,7 @@ func runEmit(arguments []string) int {
 	statusAuthorityID := flags.String("status-authority-id", "", "status authority identity")
 	statusKey := flags.String("status-key", "", "status authority ed25519 public key file")
 	specPath := flags.String("spec", "", "specification file to digest")
-	specVersion := flags.String("spec-version", "", "specification version")
+	specVersion := flags.String("spec-version", ael.SpecificationVersion, "specification version")
 	corpusDigestSource := flags.String("corpus-digest-source", "", "file whose digest identifies the conformance corpus")
 	corpusVersion := flags.String("corpus-version", "", "conformance corpus version")
 	var conformanceCommand argvList
