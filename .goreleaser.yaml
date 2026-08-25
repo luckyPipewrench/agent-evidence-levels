@@ -1,0 +1,55 @@
+version: 2
+
+project_name: agent-evidence-levels
+
+builds:
+  - id: aelcheck
+    main: ./checker/cmd/aelcheck
+    binary: aelcheck
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath, -buildvcs=false]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags: [-s, -w]
+
+  - id: aelgen
+    main: ./checker/cmd/aelgen
+    binary: aelgen
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath, -buildvcs=false]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags: [-s, -w]
+
+  - id: aelpackage
+    main: ./checker/cmd/aelpackage
+    binary: aelpackage
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath, -buildvcs=false]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags: [-s, -w]
+
+archives:
+  - ids: [aelcheck, aelgen, aelpackage]
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE
+      - LICENSE-SPEC
+
+checksum:
+  name_template: SHA256SUMS
+
+changelog:
+  disable: true
+
+release:
+  disable: true

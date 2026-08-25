@@ -60,6 +60,8 @@ validates a signed evaluation package or verification record. A verification rec
 The specification (`SPEC.md`) is CC BY 4.0. The checker and fixtures are Apache-2.0. See
 `LICENSING.md`.
 
+GitHub may label the repository license as "Other" because this split is intentional and can't be represented by one repository-wide license badge.
+
 ## Status
 
 v0.1 draft. This repository is vendor-neutral by construction: `SPEC.md` carries no product marks;
