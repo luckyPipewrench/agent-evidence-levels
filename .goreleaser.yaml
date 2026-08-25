@@ -11,7 +11,7 @@ builds:
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags: [-s, -w]
+    ldflags: [-s, -w, "-X main.version={{ .Version }}"]
 
   - id: aelgen
     main: ./checker/cmd/aelgen
@@ -21,7 +21,7 @@ builds:
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags: [-s, -w]
+    ldflags: [-s, -w, "-X main.version={{ .Version }}"]
 
   - id: aelpackage
     main: ./checker/cmd/aelpackage
@@ -31,7 +31,7 @@ builds:
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags: [-s, -w]
+    ldflags: [-s, -w, "-X main.version={{ .Version }}"]
 
 archives:
   - ids: [aelcheck, aelgen, aelpackage]

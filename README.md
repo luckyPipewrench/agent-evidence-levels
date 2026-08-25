@@ -32,11 +32,15 @@ the checker and the fixture corpus are part of v0.1, not a follow-up.
 ## Run it
 
 ```
-make build     # build aelcheck + aelgen
+make build     # build aelcheck, aelgen, and aelpackage
 make gen       # regenerate the fixture corpus from a fixed test seed
 make test      # go test ./...
 make check     # regenerate + grade the whole corpus; assert every case matches its expect.json
 ```
+
+Release archives contain all three commands. Check the build identity with `aelcheck --version`, `aelgen --version`, or `aelpackage --version`; source builds report `devel`.
+
+To install the commands from a checkout, run `go install ./checker/cmd/...`. Go writes them to `GOBIN`, or to the `bin` directory under the first `GOPATH` entry when `GOBIN` is unset; add that directory to `PATH` before invoking `aelcheck`, `aelgen`, or `aelpackage`.
 
 `make check` printing, for each rung, the valid fixture graded at that rung and every fixture
 perturbation rejected or flagged, demonstrates that the checker passes the conformance corpus. A
