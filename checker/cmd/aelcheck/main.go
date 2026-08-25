@@ -12,7 +12,15 @@ import (
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
 )
 
+// version is set by the release build with -ldflags -X. Local source builds
+// deliberately identify themselves as development builds.
+var version = "devel"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Printf("aelcheck %s\n", releaseVersion())
+		return
+	}
 	jsonOut := flag.Bool("json", false, "print machine-readable result")
 	govCheck := flag.Bool("gov", false, "also report the governability extension (reversibility class per action, out of grade)")
 	keysDir := flag.String("keys", "", "directory containing published <fingerprint>.pub files")
@@ -74,6 +82,13 @@ func main() {
 	}
 	writeSelfRunNotice(os.Stdout, report)
 	os.Exit(conformanceExit(report))
+}
+
+func releaseVersion() string {
+	if version == "" {
+		return "devel"
+	}
+	return version
 }
 
 // writeSelfRunNotice states what the printed result is and is not.

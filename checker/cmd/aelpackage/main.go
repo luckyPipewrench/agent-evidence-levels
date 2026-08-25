@@ -15,7 +15,15 @@ import (
 
 const exitNotCurrent = 3
 
+// version is set by the release build with -ldflags -X. Local source builds
+// deliberately identify themselves as development builds.
+var version = "devel"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Printf("aelpackage %s\n", releaseVersion())
+		return
+	}
 	// emit is dispatched before flag parsing so the existing validate form,
 	// which takes its flags before the verb, keeps its exact contract. A
 	// caller's working command must not change meaning because a second verb
@@ -83,6 +91,13 @@ func main() {
 	if exitCode := packageExitCode(result.DisplayState); exitCode != 0 {
 		os.Exit(exitCode)
 	}
+}
+
+func releaseVersion() string {
+	if version == "" {
+		return "devel"
+	}
+	return version
 }
 
 func packageExitCode(displayState string) int {

@@ -92,7 +92,15 @@ type govEventExpect struct {
 	Class  string `json:"class"`
 }
 
+// version is set by the release build with -ldflags -X. Local source builds
+// deliberately identify themselves as development builds.
+var version = "devel"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Printf("aelgen %s\n", releaseVersion())
+		return
+	}
 	outDir := flag.String("out", "", "fixture output directory")
 	report := flag.Bool("report", false, "run checker over generated fixtures and print a report")
 	reportJSON := flag.Bool("json", false, "emit the machine-readable corpus report instead of the human one")
@@ -109,6 +117,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "aelgen: %v\n", err)
 		os.Exit(statusForGenerateError(err))
 	}
+}
+
+func releaseVersion() string {
+	if version == "" {
+		return "devel"
+	}
+	return version
 }
 
 // statusForGenerateError maps a generate failure onto a process status.

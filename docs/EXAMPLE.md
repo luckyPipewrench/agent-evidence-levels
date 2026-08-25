@@ -79,17 +79,18 @@ an operator declaration and never affects the grade.
 
 ## 5. Emit and validate an evaluation package
 
-Generate separate operator and status-authority keys. Start with no `./example` directory so a prior key or package can't be mistaken for this run:
+Generate separate operator, verifier, and status-authority keys. Start with no `./example` directory so a prior key or package can't be mistaken for this run:
 
 ```sh
 test ! -e ./example
 ./bin/aelpackage keygen --role operator --dir ./example/trust
+./bin/aelpackage keygen --role verifier --dir ./example/trust
 ./bin/aelpackage keygen --role status --dir ./example/trust
 status_key="$(find ./example/trust/status -maxdepth 1 -type f -name '*.pub' -print -quit)"
 test -n "$status_key"
 ```
 
-Each command prints the fingerprint and both paths. Private keys are standard-base64 Ed25519 keys at `./example/operator.key` and `./example/status.key`, outside the public trust root and each created with mode `0600`. Public keys use the printed lowercase SHA-256 fingerprint under the matching role directory. The command refuses to replace either key file.
+Each command prints the fingerprint and both paths. Private keys are standard-base64 Ed25519 keys at `./example/operator.key`, `./example/verifier.key`, and `./example/status.key`, outside the public trust root and each created with mode `0600`. Public keys use the printed lowercase SHA-256 fingerprint under the matching role directory. This evaluation package uses the operator and status keys; keep the verifier key for a later verification record. The command refuses to replace either key file.
 
 The output directory must be absent or empty. Use a new directory, or remove the prior example output after you are done inspecting it. The package records a real checker invocation. It doesn't create a grade.
 
