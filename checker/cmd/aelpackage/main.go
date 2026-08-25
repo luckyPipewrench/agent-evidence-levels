@@ -23,6 +23,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "emit" {
 		os.Exit(runEmit(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "keygen" {
+		os.Exit(runKeygen(os.Args[2:]))
+	}
 
 	jsonOut := flag.Bool("json", false, "print machine-readable validation result")
 	keysDir := flag.String("keys", "", "trust root containing operators/, verifiers/, and status/ key directories")
@@ -33,7 +36,7 @@ func main() {
 	flag.Parse()
 
 	if *keysDir == "" || flag.NArg() != 2 || flag.Arg(0) != "validate" {
-		fmt.Fprintln(os.Stderr, "usage: aelpackage emit --artifact <dir> ... --out <dir>\n   or: aelpackage [--json] --keys <trust-root> [--status <status.json> --status-signature <status.sig> --status-at <RFC3339> --max-status-age <duration>] validate <package-dir>")
+		fmt.Fprintln(os.Stderr, "usage: aelpackage emit --artifact <dir> ... --out <dir>\n   or: aelpackage keygen --role operator|verifier|status --dir <trust-root>\n   or: aelpackage [--json] --keys <trust-root> [--status <status.json> --status-signature <status.sig> --status-at <RFC3339> --max-status-age <duration>] validate <package-dir>")
 		os.Exit(2)
 	}
 	var evaluationTime time.Time

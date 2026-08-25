@@ -79,7 +79,17 @@ an operator declaration and never affects the grade.
 
 ## 5. Emit and validate an evaluation package
 
-This part starts after key provisioning; it exercises the evaluation flow end to end, not the lifecycle for creating or rotating signing keys. Put the operator's standard-base64 Ed25519 private key at `./example/operator.key` with mode `0600`, its separately published public key at `./example/trust/operators/<sha256-fingerprint>.pub`, and the status authority's standard-base64 Ed25519 public key at `./example/status.pub`. The fingerprint is the lowercase SHA-256 digest of the decoded operator public-key bytes. See [Verification packages](VERIFICATION-PACKAGE.md#validate-a-package) for the role-separated trust layout.
+Generate separate operator and status-authority keys. Start with no `./example` directory so a prior key or package can't be mistaken for this run:
+
+```sh
+test ! -e ./example
+./bin/aelpackage keygen --role operator --dir ./example/trust
+./bin/aelpackage keygen --role status --dir ./example/trust
+status_key="$(find ./example/trust/status -maxdepth 1 -type f -name '*.pub' -print -quit)"
+test -n "$status_key"
+```
+
+Each command prints the fingerprint and both paths. Private keys are standard-base64 Ed25519 keys at `./example/operator.key` and `./example/status.key`, outside the public trust root and each created with mode `0600`. Public keys use the printed lowercase SHA-256 fingerprint under the matching role directory. The command refuses to replace either key file.
 
 The output directory must be absent or empty. Use a new directory, or remove the prior example output after you are done inspecting it. The package records a real checker invocation. It doesn't create a grade.
 
@@ -88,7 +98,7 @@ The output directory must be absent or empty. Use a new directory, or remove the
   --artifact fixtures/ael1/valid --artifact-keys fixtures/ael1/valid/keys \
   --checker ./bin/aelcheck --source-revision "$(git rev-parse HEAD)" \
   --operator-key ./example/operator.key --operator-id example-operator --producer-id example-producer \
-  --status-authority-id example-status --status-key ./example/status.pub \
+  --status-authority-id example-status --status-key "$status_key" \
   --spec SPEC.md --spec-version 0.1 --corpus-digest-source fixtures/CASES.txt --corpus-version fixtures \
   --conformance-command ./bin/aelgen --conformance-command --report --conformance-command --json --conformance-command --out --conformance-command ./example/conformance-fixtures \
   --custody-acquisition declared --custody-replay available --custody-review declared --custody-issuance signed \
