@@ -71,6 +71,29 @@ func TestAELV01SchemaCanonicalIDs(t *testing.T) {
 	}
 }
 
+func TestManifestSchemaConstrainsArtifactPaths(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate version test source")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", ".."))
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(readVersionFile(t, filepath.Join(root, "schema", "manifest.schema.json"))), &schema); err != nil {
+		t.Fatalf("parse manifest schema: %v", err)
+	}
+	properties := schema["properties"].(map[string]any)
+	paths := []map[string]any{
+		properties["recorders"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["file"].(map[string]any),
+		properties["anchor"].(map[string]any)["properties"].(map[string]any)["file"].(map[string]any),
+		properties["counterparty"].(map[string]any)["properties"].(map[string]any)["file"].(map[string]any),
+	}
+	for _, field := range paths {
+		if field["$ref"] != "#/$defs/relativePath" {
+			t.Fatalf("manifest path schema = %#v, want relativePath reference", field)
+		}
+	}
+}
+
 func readVersionFile(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)

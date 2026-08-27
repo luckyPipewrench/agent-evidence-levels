@@ -19,7 +19,7 @@
           "id": { "type": "string" },
           "run": { "type": "string" },
           "key": { "type": "string", "description": "declared fingerprint; MUST equal the recorder's verified signing key or the artifact fails" },
-          "file": { "type": "string", "description": "path under the artifact dir; no absolute paths or '..'" }
+          "file": { "$ref": "#/$defs/relativePath", "description": "normalized path under the artifact directory" }
         }
       }
     },
@@ -49,7 +49,7 @@
       "properties": {
         "log": { "type": "string" },
         "log_key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "file": { "type": "string" }
+        "file": { "$ref": "#/$defs/relativePath" }
       },
       "description": "AEL-3+"
     },
@@ -57,11 +57,14 @@
       "type": "object",
       "required": ["file", "flows", "key"],
       "properties": {
-        "file": { "type": "string" },
+        "file": { "$ref": "#/$defs/relativePath" },
         "flows": { "type": "array", "items": { "type": "string" } },
         "key": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       },
       "description": "AEL-4+; empty flows make the two-way audit UV"
     }
+  },
+  "$defs": {
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!\\.\\.?(/|$))[^/\\\\:\\u0000-\\u001f]+(/(?!\\.\\.?(/|$))[^/\\\\:\\u0000-\\u001f]+)*$" }
   }
 }
