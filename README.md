@@ -1,4 +1,6 @@
-# Agent Evidence Level (AEL)
+<h1 align="center">
+  <img src="assets/ael-lockup.svg" alt="Agent Evidence Level (AEL)">
+</h1>
 
 A measurement standard for AI-agent audit evidence. AEL grades a record of AI-agent activity, from
 AEL-0 to AEL-4, by what an independent party can verify, and what omission they can detect, without

@@ -6,7 +6,16 @@
 export GOFLAGS ?= -mod=mod
 BIN := ./bin
 
-.PHONY: build gen test check fmt clean
+.PHONY: build gen test check fmt clean brand check-brand
+
+brand:
+	@python3 scripts/render_brand.py
+	@magick -background none assets/ael-logo.svg -resize 256x256 assets/ael-logo-256.png
+	@magick -background none assets/social-preview.svg -resize 1280x640 assets/social-preview.png
+	@python3 scripts/render_brand.py --stamp-png
+
+check-brand:
+	@python3 scripts/render_brand.py --check
 
 build:
 	@mkdir -p $(BIN)
@@ -22,7 +31,7 @@ test:
 
 # The proof: regenerate the corpus, grade every case, assert it matches expect.json
 # (rung corpus + governability extension corpus).
-check: gen
+check: gen check-brand
 	go test ./checker/conformance/... -v
 	@echo
 	@echo "=== human-readable corpus grading ==="
