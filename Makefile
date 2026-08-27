@@ -10,8 +10,8 @@ BIN := ./bin
 
 brand:
 	@python3 scripts/render_brand.py
-	@magick -background none assets/ael-logo.svg -resize 256x256 assets/ael-logo-256.png
-	@magick -background none assets/social-preview.svg -resize 1280x640 assets/social-preview.png
+	@magick -background none assets/ael-logo.svg -resize 256x256 -strip -define png:exclude-chunks=date,time assets/ael-logo-256.png
+	@magick -background none assets/social-preview.svg -resize 1280x640 -strip -define png:exclude-chunks=date,time assets/social-preview.png
 	@python3 scripts/render_brand.py --stamp-png
 
 check-brand:
