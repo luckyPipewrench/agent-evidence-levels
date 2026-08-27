@@ -9,11 +9,19 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+)
+
+const (
+	maxManifestBytes = 1 << 20
+	maxAnchorBytes   = 16 << 20
 )
 
 type Manifest struct {
@@ -152,12 +160,14 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	}
 	art.Keys = keys
 
-	manifestPath := filepath.Join(dir, "manifest.json")
-	raw, err := os.ReadFile(manifestPath)
+	raw, err := readBoundedArtifactFile(dir, "manifest.json", maxManifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 	art.ManifestRaw = raw
+	if err := validateManifestResourceLimits(raw); err != nil {
+		return nil, fmt.Errorf("manifest limits: %w", err)
+	}
 	canon, err := Canonicalize(raw)
 	if err != nil {
 		art.ManifestErr = err
@@ -179,6 +189,9 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	if art.Manifest.AELFormat != ArtifactFormatVersion {
 		return nil, fmt.Errorf("manifest: unsupported ael_format %d; this checker implements ael_format %d",
 			art.Manifest.AELFormat, ArtifactFormatVersion)
+	}
+	if err := validateManifestSchema(raw); err != nil {
+		return nil, fmt.Errorf("manifest schema: %w", err)
 	}
 
 	for _, rec := range art.Manifest.Recorders {
@@ -242,13 +255,9 @@ func loadKeys(keysDir string) (map[string]ed25519.PublicKey, error) {
 }
 
 func loadRecorderLog(root string, rec ManifestRecorder) (*RecorderLog, error) {
-	if rec.File == "" || filepath.IsAbs(rec.File) || strings.Contains(rec.File, "..") {
-		return nil, fmt.Errorf("unsafe recorder file path %q", rec.File)
-	}
-	path := filepath.Join(root, rec.File)
-	f, err := os.Open(path)
+	f, err := openArtifactFile(root, rec.File)
 	if err != nil {
-		return nil, fmt.Errorf("open recorder %s: %w", rec.File, err)
+		return nil, fmt.Errorf("unsafe recorder file path %q: %w", rec.File, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -306,17 +315,12 @@ func (a *Artifact) loadAnchors() {
 	if a.Manifest.Anchor == nil {
 		return
 	}
-	path, err := safeArtifactPath(a.Dir, a.Manifest.Anchor.File)
+	raw, err := readBoundedArtifactFile(a.Dir, a.Manifest.Anchor.File, maxAnchorBytes)
 	if err != nil {
-		a.AnchorsErr = err
-		return
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return
 		}
-		a.AnchorsErr = err
+		a.AnchorsErr = fmt.Errorf("read anchors: %w", err)
 		return
 	}
 	a.AnchorsRaw = raw
@@ -341,14 +345,9 @@ func (a *Artifact) loadCounterparty() {
 	if a.Manifest.Counterparty == nil {
 		return
 	}
-	path, err := safeArtifactPath(a.Dir, a.Manifest.Counterparty.File)
+	f, err := openArtifactFile(a.Dir, a.Manifest.Counterparty.File)
 	if err != nil {
-		a.CounterpartyErr = err
-		return
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			a.CounterpartyMissing = true
 			return
 		}
@@ -371,11 +370,48 @@ func (a *Artifact) loadCounterparty() {
 	}
 }
 
-func safeArtifactPath(root, rel string) (string, error) {
-	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "..") {
-		return "", fmt.Errorf("unsafe artifact file path %q", rel)
+func openArtifactFile(root, rel string) (*os.File, error) {
+	if err := validateArtifactPath(rel); err != nil {
+		return nil, err
 	}
-	return filepath.Join(root, rel), nil
+	artifactRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open artifact root: %w", err)
+	}
+	defer func() { _ = artifactRoot.Close() }()
+	f, err := artifactRoot.Open(filepath.FromSlash(rel))
+	if err != nil {
+		return nil, fmt.Errorf("open artifact file: %w", err)
+	}
+	return f, nil
+}
+
+func validateArtifactPath(value string) error {
+	if value == "" || strings.Contains(value, "\\") || path.IsAbs(value) || path.Clean(value) != value {
+		return fmt.Errorf("must be a clean non-empty relative path")
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("must be a clean non-empty relative path")
+		}
+	}
+	return nil
+}
+
+func readBoundedArtifactFile(root, rel string, limit int64) ([]byte, error) {
+	f, err := openArtifactFile(root, rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("file exceeds maximum size of %d bytes", limit)
+	}
+	return raw, nil
 }
 
 func parseCounterpartyLine(line, file string, lineNo int) *CounterpartyStatement {
