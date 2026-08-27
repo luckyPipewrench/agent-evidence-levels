@@ -37,7 +37,7 @@ func TestLoadRecorderLogDefendsAgainstSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := loadRecorderLog(dir, ManifestRecorder{ID: "r1", Run: "run-a", File: "recorders/records.jsonl"})
-	if err == nil || !strings.Contains(err.Error(), "resolves outside artifact root") {
+	if err == nil {
 		t.Fatalf("loadRecorderLog error = %v, want symlink escape rejection", err)
 	}
 }
@@ -243,6 +243,7 @@ func TestManifestSchemaParityConstraintFamilies(t *testing.T) {
 		{name: "recorder missing id", mutate: func(v map[string]any) { delete(v["recorders"].([]any)[0].(map[string]any), "id") }, want: "missing required top-level key \"id\""},
 		{name: "recorder run must be string", mutate: func(v map[string]any) { v["recorders"].([]any)[0].(map[string]any)["run"] = nil }, want: "run must be a string"},
 		{name: "recorder optional key must be string", mutate: func(v map[string]any) { v["recorders"].([]any)[0].(map[string]any)["key"] = 1 }, want: "key must be a string"},
+		{name: "recorder file must stay relative", mutate: func(v map[string]any) { v["recorders"].([]any)[0].(map[string]any)["file"] = "../records.jsonl" }, want: "file must be a clean non-empty relative path"},
 		{name: "coverage enum", mutate: func(v map[string]any) { v["coverage"] = "all" }, want: "coverage must be one of"},
 		{name: "custody enum", mutate: func(v map[string]any) { v["custody"] = "somewhere" }, want: "custody must be one of"},
 		{name: "retention must be object", mutate: func(v map[string]any) { v["retention"] = nil }, want: "retention must be an object"},
@@ -257,6 +258,9 @@ func TestManifestSchemaParityConstraintFamilies(t *testing.T) {
 		{name: "anchor digest pattern", mutate: func(v map[string]any) {
 			v["anchor"] = map[string]any{"log": "log", "log_key": "bad", "file": "anchors.json"}
 		}, want: "log_key must be a lowercase sha-256 hex string"},
+		{name: "anchor file must stay relative", mutate: func(v map[string]any) {
+			v["anchor"] = map[string]any{"log": "log", "log_key": sha, "file": "../anchors.json"}
+		}, want: "file must be a clean non-empty relative path"},
 		{name: "counterparty must be object", mutate: func(v map[string]any) { v["counterparty"] = nil }, want: "counterparty must be an object"},
 		{name: "counterparty requires file", mutate: func(v map[string]any) { v["counterparty"] = map[string]any{"flows": []any{}, "key": sha} }, want: "missing required top-level key \"file\""},
 		{name: "counterparty flows strings", mutate: func(v map[string]any) {
@@ -268,6 +272,9 @@ func TestManifestSchemaParityConstraintFamilies(t *testing.T) {
 		{name: "counterparty digest pattern", mutate: func(v map[string]any) {
 			v["counterparty"] = map[string]any{"file": "counterparty.jsonl", "flows": []any{}, "key": "bad"}
 		}, want: "key must be a lowercase sha-256 hex string"},
+		{name: "counterparty file must stay relative", mutate: func(v map[string]any) {
+			v["counterparty"] = map[string]any{"file": "../counterparty.jsonl", "flows": []any{}, "key": sha}
+		}, want: "file must be a clean non-empty relative path"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

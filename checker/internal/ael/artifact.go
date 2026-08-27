@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -252,13 +253,9 @@ func loadKeys(keysDir string) (map[string]ed25519.PublicKey, error) {
 }
 
 func loadRecorderLog(root string, rec ManifestRecorder) (*RecorderLog, error) {
-	path, err := safeArtifactPath(root, rec.File)
+	f, err := openArtifactFile(root, rec.File)
 	if err != nil {
 		return nil, fmt.Errorf("unsafe recorder file path %q: %w", rec.File, err)
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open recorder %s: %w", rec.File, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -316,12 +313,16 @@ func (a *Artifact) loadAnchors() {
 	if a.Manifest.Anchor == nil {
 		return
 	}
-	path, err := safeArtifactPath(a.Dir, a.Manifest.Anchor.File)
+	f, err := openArtifactFile(a.Dir, a.Manifest.Anchor.File)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
 		a.AnchorsErr = err
 		return
 	}
-	raw, err := os.ReadFile(path)
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(f)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return
@@ -351,14 +352,9 @@ func (a *Artifact) loadCounterparty() {
 	if a.Manifest.Counterparty == nil {
 		return
 	}
-	path, err := safeArtifactPath(a.Dir, a.Manifest.Counterparty.File)
+	f, err := openArtifactFile(a.Dir, a.Manifest.Counterparty.File)
 	if err != nil {
-		a.CounterpartyErr = err
-		return
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			a.CounterpartyMissing = true
 			return
 		}
@@ -381,35 +377,20 @@ func (a *Artifact) loadCounterparty() {
 	}
 }
 
-func safeArtifactPath(root, rel string) (string, error) {
+func openArtifactFile(root, rel string) (*os.File, error) {
 	if err := validateArtifactPath(rel); err != nil {
-		return "", err
+		return nil, err
 	}
-	rootAbs, err := filepath.Abs(root)
+	artifactRoot, err := os.OpenRoot(root)
 	if err != nil {
-		return "", fmt.Errorf("resolve artifact root: %w", err)
+		return nil, fmt.Errorf("open artifact root: %w", err)
 	}
-	candidate := filepath.Join(rootAbs, filepath.FromSlash(rel))
-	if !artifactPathContained(rootAbs, candidate) {
-		return "", fmt.Errorf("path escapes artifact root")
-	}
-
-	// Schema validation is not a security boundary: loaders can be called with a
-	// Manifest assembled by a caller. Resolve existing path components and check
-	// containment again immediately before opening the declared file so an
-	// in-tree symlink cannot redirect a recorder outside the artifact.
-	resolvedRoot, err := filepath.EvalSymlinks(rootAbs)
+	defer func() { _ = artifactRoot.Close() }()
+	f, err := artifactRoot.Open(filepath.FromSlash(rel))
 	if err != nil {
-		return "", fmt.Errorf("resolve artifact root: %w", err)
+		return nil, fmt.Errorf("open artifact file: %w", err)
 	}
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(candidate))
-	if err == nil && !artifactPathContained(resolvedRoot, resolvedParent) {
-		return "", fmt.Errorf("path resolves outside artifact root")
-	}
-	if resolvedTarget, err := filepath.EvalSymlinks(candidate); err == nil && !artifactPathContained(resolvedRoot, resolvedTarget) {
-		return "", fmt.Errorf("path resolves outside artifact root")
-	}
-	return candidate, nil
+	return f, nil
 }
 
 func validateArtifactPath(value string) error {
@@ -422,11 +403,6 @@ func validateArtifactPath(value string) error {
 		}
 	}
 	return nil
-}
-
-func artifactPathContained(root, candidate string) bool {
-	rel, err := filepath.Rel(root, candidate)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func readBoundedArtifactFile(name string, limit int64) ([]byte, error) {
