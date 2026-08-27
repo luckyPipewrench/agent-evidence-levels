@@ -180,6 +180,9 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 		return nil, fmt.Errorf("manifest: unsupported ael_format %d; this checker implements ael_format %d",
 			art.Manifest.AELFormat, ArtifactFormatVersion)
 	}
+	if err := validateManifestSchema(raw); err != nil {
+		return nil, fmt.Errorf("manifest schema: %w", err)
+	}
 
 	for _, rec := range art.Manifest.Recorders {
 		log, err := loadRecorderLog(dir, rec)
