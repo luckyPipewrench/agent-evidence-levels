@@ -43,6 +43,34 @@ func TestPublishedVersionsMatchCode(t *testing.T) {
 	}
 }
 
+func TestAELV01SchemaCanonicalIDs(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate version test source")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", ".."))
+
+	for filename, want := range map[string]string{
+		"evaluation-package.schema.json":  "https://pipelab.org/schemas/ael/v0.1/evaluation-package.schema.json",
+		"manifest.schema.json":            "https://pipelab.org/schemas/ael/v0.1/manifest.schema.json",
+		"record-payload.schema.json":      "https://pipelab.org/schemas/ael/v0.1/record-payload.schema.json",
+		"verification-record.schema.json": "https://pipelab.org/schemas/ael/v0.1/verification-record.schema.json",
+		"verification-status.schema.json": "https://pipelab.org/schemas/ael/v0.1/verification-status.schema.json",
+	} {
+		t.Run(filename, func(t *testing.T) {
+			var schema struct {
+				ID string `json:"$id"`
+			}
+			if err := json.Unmarshal([]byte(readVersionFile(t, filepath.Join(root, "schema", filename))), &schema); err != nil {
+				t.Fatalf("parse schema: %v", err)
+			}
+			if schema.ID != want {
+				t.Fatalf("schema $id = %q, want %q", schema.ID, want)
+			}
+		})
+	}
+}
+
 func readVersionFile(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
