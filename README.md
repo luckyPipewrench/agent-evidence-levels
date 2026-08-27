@@ -1,6 +1,24 @@
 <h1 align="center">
-  <img src="assets/ael-lockup.svg" alt="Agent Evidence Level (AEL)">
+  <img src="assets/ael-lockup.svg" alt="Agent Evidence Level (AEL)" width="560">
 </h1>
+
+<p align="center">
+  <strong>Open standard for grading AI-agent evidence.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/luckyPipewrench/agent-evidence-levels/actions/workflows/check.yml"><img src="https://github.com/luckyPipewrench/agent-evidence-levels/actions/workflows/check.yml/badge.svg" alt="Check"></a>
+  <a href="https://go.dev/dl/"><img src="https://img.shields.io/badge/Go-1.25%2B-00e5a0?logo=go&logoColor=white&labelColor=0e0e11" alt="Go 1.25+"></a>
+  <a href="LICENSE-SPEC"><img src="https://img.shields.io/badge/Spec-CC_BY_4.0-00e5a0?labelColor=0e0e11" alt="Specification license: CC BY 4.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-Apache_2.0-00e5a0?labelColor=0e0e11" alt="Code license: Apache 2.0"></a>
+  <a href="#status"><img src="https://img.shields.io/badge/Status-v0.1_draft-94a3b8?labelColor=0e0e11" alt="Status: v0.1 draft"></a>
+  <a href="https://discord.gg/badNfhGKTc"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white&labelColor=0e0e11" alt="Discord"></a>
+</p>
+
+<p align="center">
+  A vendor-neutral standard maintained by <a href="https://pipelab.org">PipeLab</a>.
+  Producers and operators cannot award AEL grades, including PipeLab and Pipelock.
+</p>
 
 A measurement standard for AI-agent audit evidence. AEL grades a record of AI-agent activity, from
 AEL-0 to AEL-4, by what an independent party can verify, and what omission they can detect, without
@@ -65,6 +83,9 @@ validates a signed evaluation package or verification record. A verification rec
 
 The specification (`SPEC.md`) is CC BY 4.0. The checker and fixtures are Apache-2.0. See
 `LICENSING.md`.
+
+CC BY 4.0 lets anyone copy or adapt the written specification with attribution. Apache 2.0 lets
+anyone use, modify, and distribute the checker and corpus under its notice and patent terms.
 
 GitHub may label the repository license as "Other" because this split is intentional and can't be represented by one repository-wide license badge.
 
