@@ -10,11 +10,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+const maxManifestBytes = 1 << 20
 
 type Manifest struct {
 	AELFormat      int                `json:"ael_format"`
@@ -153,11 +157,14 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	art.Keys = keys
 
 	manifestPath := filepath.Join(dir, "manifest.json")
-	raw, err := os.ReadFile(manifestPath)
+	raw, err := readBoundedArtifactFile(manifestPath, maxManifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 	art.ManifestRaw = raw
+	if err := validateManifestResourceLimits(raw); err != nil {
+		return nil, fmt.Errorf("manifest limits: %w", err)
+	}
 	canon, err := Canonicalize(raw)
 	if err != nil {
 		art.ManifestErr = err
@@ -245,10 +252,10 @@ func loadKeys(keysDir string) (map[string]ed25519.PublicKey, error) {
 }
 
 func loadRecorderLog(root string, rec ManifestRecorder) (*RecorderLog, error) {
-	if rec.File == "" || filepath.IsAbs(rec.File) || strings.Contains(rec.File, "..") {
-		return nil, fmt.Errorf("unsafe recorder file path %q", rec.File)
+	path, err := safeArtifactPath(root, rec.File)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe recorder file path %q: %w", rec.File, err)
 	}
-	path := filepath.Join(root, rec.File)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open recorder %s: %w", rec.File, err)
@@ -375,10 +382,67 @@ func (a *Artifact) loadCounterparty() {
 }
 
 func safeArtifactPath(root, rel string) (string, error) {
-	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "..") {
-		return "", fmt.Errorf("unsafe artifact file path %q", rel)
+	if err := validateArtifactPath(rel); err != nil {
+		return "", err
 	}
-	return filepath.Join(root, rel), nil
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact root: %w", err)
+	}
+	candidate := filepath.Join(rootAbs, filepath.FromSlash(rel))
+	if !artifactPathContained(rootAbs, candidate) {
+		return "", fmt.Errorf("path escapes artifact root")
+	}
+
+	// Schema validation is not a security boundary: loaders can be called with a
+	// Manifest assembled by a caller. Resolve existing path components and check
+	// containment again immediately before opening the declared file so an
+	// in-tree symlink cannot redirect a recorder outside the artifact.
+	resolvedRoot, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact root: %w", err)
+	}
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(candidate))
+	if err == nil && !artifactPathContained(resolvedRoot, resolvedParent) {
+		return "", fmt.Errorf("path resolves outside artifact root")
+	}
+	if resolvedTarget, err := filepath.EvalSymlinks(candidate); err == nil && !artifactPathContained(resolvedRoot, resolvedTarget) {
+		return "", fmt.Errorf("path resolves outside artifact root")
+	}
+	return candidate, nil
+}
+
+func validateArtifactPath(value string) error {
+	if value == "" || strings.Contains(value, "\\") || path.IsAbs(value) || path.Clean(value) != value {
+		return fmt.Errorf("must be a clean non-empty relative path")
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("must be a clean non-empty relative path")
+		}
+	}
+	return nil
+}
+
+func artifactPathContained(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func readBoundedArtifactFile(name string, limit int64) ([]byte, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("file exceeds maximum size of %d bytes", limit)
+	}
+	return raw, nil
 }
 
 func parseCounterpartyLine(line, file string, lineNo int) *CounterpartyStatement {

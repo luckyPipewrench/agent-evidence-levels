@@ -4,11 +4,136 @@ package ael
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoadArtifactRejectsUnsafeRecorderPaths(t *testing.T) {
+	for _, file := range []string{"/tmp/records.jsonl", "../records.jsonl", "recorders/../records.jsonl", "recorders//r1.jsonl", "recorders\\r1.jsonl", "."} {
+		t.Run(file, func(t *testing.T) {
+			dir := t.TempDir()
+			raw := manifestForRecorderPathTest(t, file)
+			if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadArtifact(dir, filepath.Join(dir, "keys"))
+			if err == nil || !strings.Contains(err.Error(), "file must be a clean non-empty relative path") {
+				t.Fatalf("LoadArtifact error = %v, want unsafe path rejection", err)
+			}
+		})
+	}
+}
+
+func TestLoadRecorderLogDefendsAgainstSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	escape := filepath.Join(t.TempDir(), "records.jsonl")
+	if err := os.WriteFile(escape, []byte("outside artifact\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(escape), filepath.Join(dir, "recorders")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadRecorderLog(dir, ManifestRecorder{ID: "r1", Run: "run-a", File: "recorders/records.jsonl"})
+	if err == nil || !strings.Contains(err.Error(), "resolves outside artifact root") {
+		t.Fatalf("loadRecorderLog error = %v, want symlink escape rejection", err)
+	}
+}
+
+func TestManifestResourceLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{
+			name: "array items",
+			mutate: func(v map[string]any) {
+				items := make([]any, maxManifestArrayItems+1)
+				for i := range items {
+					items[i] = fmt.Sprintf("run-%d", i)
+				}
+				v["runs"] = items
+			},
+			want: "manifest array has more than",
+		},
+		{
+			name: "string bytes",
+			mutate: func(v map[string]any) {
+				v["runs"] = []any{strings.Repeat("r", maxManifestStringBytes+1)}
+			},
+			want: "manifest string exceeds maximum size",
+		},
+		{
+			name: "extension object members",
+			mutate: func(v map[string]any) {
+				ext := make(map[string]any, maxManifestObjectFields+1)
+				for i := range maxManifestObjectFields + 1 {
+					ext[fmt.Sprintf("field-%d", i)] = true
+				}
+				v["ext"] = ext
+			},
+			want: "manifest object has more than",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := validManifestForSchemaTests()
+			tc.mutate(manifest)
+			raw, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateManifestSchema(raw); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validateManifestSchema error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadArtifactRejectsOversizedManifestBeforeDecode(t *testing.T) {
+	dir := t.TempDir()
+	raw := []byte(`{"ael_format":1,"ext":"` + strings.Repeat("x", maxManifestBytes) + `","recorders":[{"file":"recorders/r1.jsonl","id":"r1","run":"run-a"}],"runs":["run-a"]}`)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadArtifact(dir, filepath.Join(dir, "keys"))
+	if err == nil || !strings.Contains(err.Error(), "maximum size") {
+		t.Fatalf("LoadArtifact error = %v, want manifest size rejection", err)
+	}
+}
+
+func TestDecisionInputMemberLimit(t *testing.T) {
+	inputs := make(map[string]any, maxDecisionInputFields+1)
+	for i := range maxDecisionInputFields + 1 {
+		inputs[fmt.Sprintf("input-%d", i)] = true
+	}
+	raw, err := json.Marshal(map[string]any{
+		"v": 1, "type": "activity", "run": "run-a", "recorder": "r1",
+		"key": strings.Repeat("0", 64), "seq": 1, "prev": strings.Repeat("0", 64), "ts": "2026-01-01T00:00:00Z",
+		"event":    map[string]any{"class": "net", "id": "event-1", "dir": "out"},
+		"decision": map[string]any{"policy": strings.Repeat("0", 64), "request_fp": "request", "inputs": inputs, "verdict": "allow"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRecordPayloadSchema(raw, "activity"); err == nil || !strings.Contains(err.Error(), "decision.inputs has more than") {
+		t.Fatalf("validateRecordPayloadSchema error = %v, want decision input limit", err)
+	}
+}
+
+func manifestForRecorderPathTest(t *testing.T, file string) []byte {
+	t.Helper()
+	manifest := validManifestForSchemaTests()
+	manifest["recorders"].([]any)[0].(map[string]any)["file"] = file
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 func TestLoadArtifactRejectsUnsupportedAELFormat(t *testing.T) {
 	for _, format := range []string{"0", "2"} {

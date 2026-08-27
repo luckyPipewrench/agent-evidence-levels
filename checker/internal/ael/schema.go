@@ -7,12 +7,21 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
 )
 
 var sha256HexRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+const (
+	maxManifestArrayItems   = 1024
+	maxManifestStringBytes  = 16 << 10
+	maxManifestObjectFields = 128
+	maxManifestNestingDepth = 16
+	maxDecisionInputFields  = 64
+)
 
 type signedTreeHead struct {
 	Log  string `json:"log"`
@@ -134,6 +143,9 @@ func validateRecordPayloadSchema(raw []byte, typ string) error {
 // The manifest remains an open declaration schema, but these bounds are part of
 // its wire contract and must not be accepted more broadly by the checker.
 func validateManifestSchema(raw []byte) error {
+	if err := validateManifestResourceLimits(raw); err != nil {
+		return err
+	}
 	obj, err := objectFields(raw, "manifest")
 	if err != nil {
 		return err
@@ -217,6 +229,13 @@ func validateManifestRecorder(raw json.RawMessage) error {
 			return err
 		}
 	}
+	file, err := requiredString(obj, "file", false)
+	if err != nil {
+		return err
+	}
+	if err := validateArtifactPath(file); err != nil {
+		return fmt.Errorf("file %w", err)
+	}
 	if _, ok := obj["key"]; ok {
 		if _, err := requiredString(obj, "key", false); err != nil {
 			return err
@@ -257,8 +276,14 @@ func validateAnchorDeclSchema(raw json.RawMessage) error {
 	if err := requiredSHA256Hex(obj, "log_key"); err != nil {
 		return err
 	}
-	_, err = requiredString(obj, "file", false)
-	return err
+	file, err := requiredString(obj, "file", false)
+	if err != nil {
+		return err
+	}
+	if err := validateArtifactPath(file); err != nil {
+		return fmt.Errorf("file %w", err)
+	}
+	return nil
 }
 
 func validateCounterpartyDeclSchema(raw json.RawMessage) error {
@@ -271,8 +296,12 @@ func validateCounterpartyDeclSchema(raw json.RawMessage) error {
 			return err
 		}
 	}
-	if _, err := requiredString(obj, "file", false); err != nil {
+	file, err := requiredString(obj, "file", false)
+	if err != nil {
 		return err
+	}
+	if err := validateArtifactPath(file); err != nil {
+		return fmt.Errorf("file %w", err)
 	}
 	if err := validateStringArray(obj["flows"], "flows", 0); err != nil {
 		return err
@@ -319,12 +348,91 @@ func validateDecisionSchema(raw json.RawMessage) error {
 	if err != nil {
 		return err
 	}
+	if len(inputs) > maxDecisionInputFields {
+		return fmt.Errorf("decision.inputs has more than %d members", maxDecisionInputFields)
+	}
 	for key, value := range inputs {
 		if err := validateDecisionInputValue(value); err != nil {
 			return fmt.Errorf("decision.inputs.%s: %w", key, err)
 		}
 	}
 	return validateEnumRaw(obj["verdict"], "decision.verdict", "allow", "block", "defer")
+}
+
+// validateManifestResourceLimits bounds every JSON container before the
+// manifest is decoded into Go collections. The manifest is an untrusted table
+// of contents, so an otherwise-valid declaration cannot force unbounded
+// allocation through large arrays, strings, extension objects, or nesting.
+func validateManifestResourceLimits(raw []byte) error {
+	if len(raw) > maxManifestBytes {
+		return fmt.Errorf("manifest exceeds maximum size of %d bytes", maxManifestBytes)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	type container struct {
+		object    bool
+		count     int
+		expectKey bool
+	}
+	var stack []container
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if delim, ok := tok.(json.Delim); ok && (delim == '}' || delim == ']') {
+			if len(stack) == 0 || (delim == '}' && !stack[len(stack)-1].object) || (delim == ']' && stack[len(stack)-1].object) {
+				return fmt.Errorf("invalid JSON container close")
+			}
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		if len(stack) > 0 && stack[len(stack)-1].object && stack[len(stack)-1].expectKey {
+			key, ok := tok.(string)
+			if !ok {
+				return fmt.Errorf("object key is %T, not string", tok)
+			}
+			if len(key) > maxManifestStringBytes {
+				return fmt.Errorf("manifest string exceeds maximum size of %d bytes", maxManifestStringBytes)
+			}
+			stack[len(stack)-1].count++
+			if stack[len(stack)-1].count > maxManifestObjectFields {
+				return fmt.Errorf("manifest object has more than %d members", maxManifestObjectFields)
+			}
+			stack[len(stack)-1].expectKey = false
+			continue
+		}
+		if len(stack) > 0 {
+			parent := &stack[len(stack)-1]
+			if parent.object {
+				parent.expectKey = true
+			} else {
+				parent.count++
+				if parent.count > maxManifestArrayItems {
+					return fmt.Errorf("manifest array has more than %d items", maxManifestArrayItems)
+				}
+			}
+		}
+		if text, ok := tok.(string); ok && len(text) > maxManifestStringBytes {
+			return fmt.Errorf("manifest string exceeds maximum size of %d bytes", maxManifestStringBytes)
+		}
+		if delim, ok := tok.(json.Delim); ok {
+			if delim != '{' && delim != '[' {
+				return fmt.Errorf("unexpected JSON delimiter %q", delim)
+			}
+			if len(stack) >= maxManifestNestingDepth {
+				return fmt.Errorf("manifest exceeds maximum nesting depth of %d", maxManifestNestingDepth)
+			}
+			stack = append(stack, container{object: delim == '{', expectKey: delim == '{'})
+		}
+	}
+	if len(stack) != 0 {
+		return fmt.Errorf("unterminated JSON container")
+	}
+	return nil
 }
 
 func validateDecisionInputValue(raw json.RawMessage) error {
