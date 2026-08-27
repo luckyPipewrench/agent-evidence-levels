@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-evidence-levels.example/schema/verification-status.schema.json",
+  "$id": "https://pipelab.org/schemas/ael/v0.1/verification-status.schema.json",
   "title": "AEL verification record status statement",
   "type": "object",
   "additionalProperties": false,

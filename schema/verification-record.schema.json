@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-evidence-levels.example/schema/verification-record.schema.json",
+  "$id": "https://pipelab.org/schemas/ael/v0.1/verification-record.schema.json",
   "title": "AEL verification record manifest",
   "type": "object",
   "additionalProperties": false,

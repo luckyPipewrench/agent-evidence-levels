@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-evidence-levels.example/schema/evaluation-package.schema.json",
+  "$id": "https://pipelab.org/schemas/ael/v0.1/evaluation-package.schema.json",
   "title": "AEL evaluation package manifest",
   "type": "object",
   "additionalProperties": false,
