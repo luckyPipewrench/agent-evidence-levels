@@ -19,7 +19,10 @@ import (
 	"strings"
 )
 
-const maxManifestBytes = 1 << 20
+const (
+	maxManifestBytes = 1 << 20
+	maxAnchorBytes   = 16 << 20
+)
 
 type Manifest struct {
 	AELFormat      int                `json:"ael_format"`
@@ -157,8 +160,7 @@ func LoadArtifact(dir, keysDir string) (*Artifact, error) {
 	}
 	art.Keys = keys
 
-	manifestPath := filepath.Join(dir, "manifest.json")
-	raw, err := readBoundedArtifactFile(manifestPath, maxManifestBytes)
+	raw, err := readBoundedArtifactFile(dir, "manifest.json", maxManifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
@@ -313,21 +315,12 @@ func (a *Artifact) loadAnchors() {
 	if a.Manifest.Anchor == nil {
 		return
 	}
-	f, err := openArtifactFile(a.Dir, a.Manifest.Anchor.File)
+	raw, err := readBoundedArtifactFile(a.Dir, a.Manifest.Anchor.File, maxAnchorBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return
 		}
-		a.AnchorsErr = err
-		return
-	}
-	defer func() { _ = f.Close() }()
-	raw, err := io.ReadAll(f)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		a.AnchorsErr = err
+		a.AnchorsErr = fmt.Errorf("read anchors: %w", err)
 		return
 	}
 	a.AnchorsRaw = raw
@@ -405,8 +398,8 @@ func validateArtifactPath(value string) error {
 	return nil
 }
 
-func readBoundedArtifactFile(name string, limit int64) ([]byte, error) {
-	f, err := os.Open(name)
+func readBoundedArtifactFile(root, rel string, limit int64) ([]byte, error) {
+	f, err := openArtifactFile(root, rel)
 	if err != nil {
 		return nil, err
 	}

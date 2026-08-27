@@ -36,9 +36,63 @@ func TestLoadRecorderLogDefendsAgainstSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(filepath.Dir(escape), filepath.Join(dir, "recorders")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadRecorderLog(dir, ManifestRecorder{ID: "r1", Run: "run-a", File: "recorders/records.jsonl"})
-	if err == nil {
-		t.Fatalf("loadRecorderLog error = %v, want symlink escape rejection", err)
+	f, err := openArtifactFile(dir, "recorders/records.jsonl")
+	if f != nil {
+		_ = f.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "open artifact file") {
+		t.Fatalf("openArtifactFile error = %v, want rooted-open symlink rejection", err)
+	}
+}
+
+func TestLoadArtifactDefendsAgainstManifestSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	escape := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(escape, manifestForRecorderPathTest(t, "recorders/r1.jsonl"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escape, filepath.Join(dir, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadArtifact(dir, filepath.Join(dir, "keys"))
+	if err == nil || !strings.Contains(err.Error(), "read manifest: open artifact file") {
+		t.Fatalf("LoadArtifact error = %v, want rooted-open manifest rejection", err)
+	}
+}
+
+func TestLoadAnchorsRejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "anchors.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxAnchorBytes + 1); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	art := &Artifact{Dir: dir, Manifest: Manifest{Anchor: &AnchorDecl{File: "anchors.json"}}}
+	art.loadAnchors()
+	if art.AnchorsErr == nil || !strings.Contains(art.AnchorsErr.Error(), "maximum size") {
+		t.Fatalf("AnchorsErr = %v, want anchor size rejection", art.AnchorsErr)
+	}
+}
+
+func TestReadBoundedArtifactFileSizeBoundary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bounded.json")
+	if err := os.WriteFile(path, []byte("1234"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := readBoundedArtifactFile(dir, "bounded.json", 4)
+	if err != nil || string(raw) != "1234" {
+		t.Fatalf("exact-limit read = %q, %v; want success", raw, err)
+	}
+	if _, err := readBoundedArtifactFile(dir, "bounded.json", 3); err == nil || !strings.Contains(err.Error(), "maximum size") {
+		t.Fatalf("over-limit read error = %v, want size rejection", err)
 	}
 }
 
