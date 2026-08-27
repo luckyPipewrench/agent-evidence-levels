@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]; A=ROOT/'assets'; MARK=A/'mark.svg'
 ACCENT='#00e5a0'; BG='#09090b'; TEXT='#e2e8f0'; MUTED='#94a3b8'; DIM='#64748b'; PURPLE='#7c3aed'
 MONO="'JetBrains Mono','JetBrainsMono Nerd Font',ui-monospace,SFMono-Regular,Menlo,monospace"
 SANS="Inter,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-NAME='Agent Evidence Level'; LEAD='Agent Evidence '; TAG='Open standard for grading agent evidence'
+NAME='Agent Evidence Level'; LEAD='Agent Evidence '; TAG='Open standard for grading AI-agent evidence'
 FOOT='Apache 2.0 code  ·  maintained by PipeLab'
 def inner():
  t=MARK.read_text(); v=re.search(r'viewBox="([^"]+)"',t); b=re.search(r'<svg[^>]*>(.*)</svg>',t,re.S)
@@ -51,6 +51,10 @@ def main():
  expected={A/n:f() for n,f in FILES.items()}
  if a.check:
   bad=[str(x.relative_to(ROOT)) for x,c in expected.items() if not x.exists() or x.read_text()!=c]
+  readme=(ROOT/'README.md').read_text()
+  if 'assets/ael-lockup.svg' not in readme: bad.append('README.md: missing generated lockup')
+  for workflow in sorted(set(re.findall(r'actions/workflows/([\w.-]+\.(?:yml|yaml))',readme))):
+   if not (ROOT/'.github'/'workflows'/workflow).is_file(): bad.append('README.md: missing workflow '+workflow)
   for png,svg in PNGS.items():
    side=A/(png+'.source')
    if not (A/png).exists() or not side.exists() or side.read_text()!=stamp(A/png,A/svg):bad.append('assets/'+png)
