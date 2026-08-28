@@ -39,3 +39,16 @@ jobs:
         run: |
           git diff --exit-code HEAD -- fixtures/
           test -z "$(git status --porcelain --untracked-files=all --ignored=matching -- fixtures/)"
+
+      # The release workflow gates publication on this same scan. Running it here
+      # too means a newly published advisory against the pinned toolchain surfaces
+      # on an ordinary pull request instead of for the first time during a release,
+      # and it means the step itself has been executed before a tag depends on it.
+      # A flag typo or a runner difference discovered by burning a tag is a poor
+      # way to learn that a gate does not work.
+      - name: Reject reachable vulnerabilities
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/govulncheck-bin"
+          GOBIN="$tool_dir" go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "$tool_dir/govulncheck" -db https://vuln.go.dev -mode=source ./...

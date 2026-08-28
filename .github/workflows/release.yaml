@@ -23,13 +23,11 @@ jobs:
       # patchless `go 1.25` directive and `1.25.x` to the same latest 1.25
       # patch, so it restates the policy without freezing anything.
       #
-      # An exact pin is the right call HERE specifically because this project
-      # sells byte-reproducible verification: the clean-room proof replays a
-      # recorded result byte for byte, and a floating builder undermines the
-      # claim the release exists to make. The pin cannot rot silently, because
-      # the govulncheck gate below fails the release when this patch acquires a
-      # reachable vulnerability, which forces a deliberate bump rather than a
-      # quiet drift.
+      # The pin exists so the toolchain that builds a published binary is a
+      # decision rather than whatever was newest that day, and so the version
+      # the binaries self-report is predictable. It cannot rot silently: the
+      # govulncheck gate below fails the release when this patch acquires a
+      # reachable vulnerability, which forces a deliberate bump.
       #
       # The consumer floor in go.mod stays unpinned on purpose: a patch pin
       # there would force a toolchain download on anyone building the checker
@@ -41,8 +39,19 @@ jobs:
 
       - name: Run release gates
         shell: bash
+        env:
+          # Refuse an implicit toolchain switch. Without this, a `toolchain`
+          # directive added to go.mod later, or a GOTOOLCHAIN repository or
+          # organization variable, would silently download and use a different
+          # compiler than the pin selects, leaving the pin decorative.
+          GOTOOLCHAIN: local
         run: |
           set -euo pipefail
+          # The pin above SELECTS a toolchain; this asserts the one actually
+          # running is that toolchain. A pin nothing verifies is a claim, and
+          # this repository's whole subject is the difference between a recorded
+          # claim and a verified one.
+          go version | grep -qF 'go1.25.14 ' || { echo "toolchain drift: $(go version), expected go1.25.14"; exit 1; }
           go vet ./...
           go test ./...
           make check
