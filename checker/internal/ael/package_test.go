@@ -26,6 +26,34 @@ func TestPackageSchemaRejectsEvaluationGrades(t *testing.T) {
 	}
 }
 
+func TestEvaluationDisplayStateDistinguishesOpenFromFailure(t *testing.T) {
+	if got := evaluationDisplayState(4); got != "EVALUATION-OPEN" {
+		t.Errorf("open evaluation display state = %q, want EVALUATION-OPEN", got)
+	}
+	for _, status := range []int{1, 2, 3, 5} {
+		if got := evaluationDisplayState(status); got != "EVALUATION-FAILED" {
+			t.Errorf("exit %d display state = %q, want EVALUATION-FAILED", status, got)
+		}
+	}
+}
+
+func TestOpenVerificationRecordRejectsGradeMismatch(t *testing.T) {
+	fixtureRoot := copyPackageFixture(t, "valid_verification_record")
+	rewritePackageFixtureManifest(t, fixtureRoot, func(manifest map[string]any) {
+		manifest["artifact_evaluation"].(map[string]any)["exit_status"] = float64(4)
+		manifest["grades"].([]any)[0].(map[string]any)["line"] = "run run-ael1-valid: AEL-4 +R"
+	})
+
+	_, err := ValidatePackage(
+		filepath.Join(fixtureRoot, "package"),
+		filepath.Join(fixtureRoot, "trust"),
+		packageFixtureValidationOptions(t, filepath.Join(fixtureRoot, "status.json"), filepath.Join(fixtureRoot, "status.sig")),
+	)
+	if err == nil || !strings.Contains(err.Error(), "disagrees with artifact evaluation machine output") {
+		t.Fatalf("validation error = %v, want grade mismatch rejection", err)
+	}
+}
+
 // TestArtifactBindingRequiresExactManifestPath guards the DECLARED artifact
 // manifest against the one actually evaluated. LoadArtifact always reads
 // <root>/manifest.json, so a declared path that merely sits inside the root and

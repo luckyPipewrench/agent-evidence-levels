@@ -253,14 +253,14 @@ func validatePackageDir(dir, keysDir string, options PackageValidationOptions) (
 	if err := validateArtifactBinding(dir, &manifest); err != nil {
 		return PackageValidation{}, err
 	}
-	if manifest.Kind == "verification-record" && manifest.ArtifactEvaluation.ExitStatus == 0 {
+	if manifest.Kind == "verification-record" && (manifest.ArtifactEvaluation.ExitStatus == 0 || manifest.ArtifactEvaluation.ExitStatus == 4) {
 		if err := validatePackageGradesAgainstMachineOutput(dir, &manifest); err != nil {
 			return PackageValidation{}, err
 		}
 	}
 	result := PackageValidation{Kind: manifest.Kind, ID: manifest.ID, DisplayState: "EVALUATED"}
 	if manifest.ArtifactEvaluation.ExitStatus != 0 {
-		result.DisplayState = "EVALUATION-FAILED"
+		result.DisplayState = evaluationDisplayState(manifest.ArtifactEvaluation.ExitStatus)
 		return result, nil
 	}
 	if manifest.Conformance.ExitStatus != 0 {
@@ -352,6 +352,13 @@ func validatePackageDir(dir, keysDir string, options PackageValidationOptions) (
 		return PackageValidation{}, fmt.Errorf("status state %q is invalid", status.State)
 	}
 	return result, nil
+}
+
+func evaluationDisplayState(exitStatus int) string {
+	if exitStatus == 4 {
+		return "EVALUATION-OPEN"
+	}
+	return "EVALUATION-FAILED"
 }
 
 func hasConsumerEvaluationTime(evaluationTime time.Time) bool {

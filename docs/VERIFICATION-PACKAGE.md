@@ -12,8 +12,9 @@ The package root contains the artifact under `artifact/`, published artifact key
 ## Package kinds
 
 `evaluation-package` is an operator-signed evaluation result. Its closed schema has no `grade`,
-`grades`, `verified`, or verifier-state field. A consumer displays it as `EVALUATED`, never
-`VERIFIED` or an AEL grade.
+`grades`, `verified`, or verifier-state field. A consumer displays a final conforming result as
+`EVALUATED`, an open evaluation as `EVALUATION-OPEN`, and another nonzero evaluation result as
+`EVALUATION-FAILED`; none is `VERIFIED` or an AEL grade.
 
 `verification-record` is signed by a verifier. It carries per-run grade lines, annotations, and PASS, FAIL, or UV outcomes. The validator rejects a record when the verifier identifier equals the producer or operator identifier. It also loads the bound artifact and compares all discovered runs with the signed run list and grade entries. A favorable run can't hide another run that appears in the submitted recorder files.
 
@@ -101,12 +102,13 @@ Exit statuses distinguish the two failures that demand opposite responses:
 | 1 | No package exists; the emit itself failed. |
 | 2 | Usage error. |
 | 3 | The package was written and the artifact did not conform. |
-| 4 | The package was written and published, but its result could not be reported. |
+| 4 | The package was written and published, but at least one evaluated run remains open. |
 
 Status 3 is the case worth reading twice. A nonconforming artifact is still packaged, carrying its
-real exit status, and the validator then displays it as `EVALUATION-FAILED`. Refusing to emit there
-would turn every negative result into a missing file, which is the one outcome a reader cannot
-distinguish from work nobody did.
+real exit status, and the validator then displays it as `EVALUATION-FAILED`. An open artifact is
+also packaged: its recorded checker status is 4 and the validator displays `EVALUATION-OPEN`, not
+a failure or a completed evaluation. Refusing to emit either result would turn it into a missing
+file, which is the one outcome a reader cannot distinguish from work nobody did.
 
 The emitted package replays. The checker runs once, so the recorded arguments, exit status, stdout
 and stderr all describe that single execution. Those arguments are relative to the package root, so a
@@ -135,7 +137,7 @@ authenticates status statements. The command validates canonical JSON, the detac
 signature, every content-addressed blob, path containment, package-kind rules, verifier identity,
 and the complete discovered-run report.
 
-An evaluation package exits 0 and reports `EVALUATED` after those checks. A nonzero artifact-evaluation exit reports `EVALUATION-FAILED`, and a nonzero conformance-corpus exit reports `CONFORMANCE-FAILED`; neither can support a grade. An empty conformance command is invalid because the package no longer carries the required replay instruction. A verification record is also invalid if its grade lines, annotations, or outcomes disagree with the bundled machine-readable checker result.
+An evaluation package exits 0 and reports `EVALUATED` after those checks. A recorded checker status 4 reports `EVALUATION-OPEN`; another nonzero artifact-evaluation status reports `EVALUATION-FAILED`, and a nonzero conformance-corpus exit reports `CONFORMANCE-FAILED`; none can support a grade. An empty conformance command is invalid because the package no longer carries the required replay instruction. A verification record is also invalid if its grade lines, annotations, or outcomes disagree with the bundled machine-readable checker result.
 
 A verification record needs a separately signed `current` status statement and an evaluation time supplied by the relying party before it can report `VERIFIED`:
 

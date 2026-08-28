@@ -71,7 +71,14 @@ aelcheck --keys <keysdir> <artifact>
 ```
 
 grades one artifact and prints the full grade line plus a per-check `PASS` / `FAIL` / `UV`
-table. `UV` means unable to verify.
+table. `UV` means unable to verify. Use `--min-grade N` to require every final run to earn at
+least AEL-N, where N is 0 through 4.
+
+Exit status 0 means every run is final and earned the required grade. Status 3 means at least one
+final run did not earn it, while status 4 means at least one run remains open and is not final.
+Status 4 takes precedence when an artifact has both conditions, so automation retains the
+not-final signal; every nonzero status remains a failed requirement. Statuses 1 and 2 mean the
+checker could not complete and the command was used incorrectly, respectively.
 
 ```
 aelpackage --keys <trust-root> validate <package-dir>

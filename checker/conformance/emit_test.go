@@ -192,15 +192,19 @@ func TestEmitRecordsNonconformingRun(t *testing.T) {
 func TestEmitSelectedRunStillBindsAllDiscoveredRuns(t *testing.T) {
 	harness := newEmitHarness(t, "multi_run/mixed")
 	harness.options.Run = "run-mixed-a"
-	if _, err := ael.EmitEvaluationPackage(harness.options); err != nil {
+	result, err := ael.EmitEvaluationPackage(harness.options)
+	if err != nil {
 		t.Fatalf("emit: %v", err)
+	}
+	if result.ExitStatus != 4 {
+		t.Fatalf("checker exit status = %d, want 4 for an open run", result.ExitStatus)
 	}
 	validation, err := ael.ValidatePackage(harness.options.OutDir, harness.trustRoot, ael.PackageValidationOptions{})
 	if err != nil {
 		t.Fatalf("validate emitted package: %v", err)
 	}
-	if validation.DisplayState != "EVALUATED" {
-		t.Errorf("display state = %q, want EVALUATED", validation.DisplayState)
+	if validation.DisplayState != "EVALUATION-OPEN" {
+		t.Errorf("display state = %q, want EVALUATION-OPEN", validation.DisplayState)
 	}
 	raw, err := os.ReadFile(filepath.Join(harness.options.OutDir, "manifest.json"))
 	if err != nil {
