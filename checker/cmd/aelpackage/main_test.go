@@ -13,6 +13,7 @@ func TestPackageExitCode(t *testing.T) {
 		{state: "VERIFIED", want: 0},
 		{state: "STATUS-UNKNOWN", want: exitNotCurrent},
 		{state: "EVALUATION-FAILED", want: exitNotCurrent},
+		{state: "EVALUATION-OPEN", want: exitNotCurrent},
 		{state: "CONFORMANCE-FAILED", want: exitNotCurrent},
 		{state: "EXPIRED", want: exitNotCurrent},
 		{state: "REVOKED", want: exitNotCurrent},

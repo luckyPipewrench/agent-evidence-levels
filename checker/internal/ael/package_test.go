@@ -26,6 +26,17 @@ func TestPackageSchemaRejectsEvaluationGrades(t *testing.T) {
 	}
 }
 
+func TestEvaluationDisplayStateDistinguishesOpenFromFailure(t *testing.T) {
+	if got := evaluationDisplayState(4); got != "EVALUATION-OPEN" {
+		t.Errorf("open evaluation display state = %q, want EVALUATION-OPEN", got)
+	}
+	for _, status := range []int{1, 2, 3, 5} {
+		if got := evaluationDisplayState(status); got != "EVALUATION-FAILED" {
+			t.Errorf("exit %d display state = %q, want EVALUATION-FAILED", status, got)
+		}
+	}
+}
+
 // TestArtifactBindingRequiresExactManifestPath guards the DECLARED artifact
 // manifest against the one actually evaluated. LoadArtifact always reads
 // <root>/manifest.json, so a declared path that merely sits inside the root and

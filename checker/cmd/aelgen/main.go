@@ -437,6 +437,14 @@ func writePackageFixtures(root string) error {
 	}); err != nil {
 		return err
 	}
+	if evaluationOpen, err := writePackageFixture(root, "evaluation_open", "verification-record", "multi_run/mixed", []string{"run-mixed-a", "run-mixed-b"}, "current"); err != nil {
+		return err
+	} else if err := rewritePackageManifest(evaluationOpen.packageDir, "package-verifier", func(manifest map[string]any) error {
+		manifest["artifact_evaluation"].(map[string]any)["exit_status"] = 4
+		return nil
+	}); err != nil {
+		return err
+	}
 	if conformanceFailed, err := writePackageFixture(root, "conformance_failed", "verification-record", "ael1/valid", []string{"run-ael1-valid"}, "current"); err != nil {
 		return err
 	} else if err := rewritePackageManifest(conformanceFailed.packageDir, "package-verifier", func(manifest map[string]any) error {
@@ -1020,6 +1028,7 @@ func writePackageFixtureExpectations(root string) error {
 		"binding_omits_discovered_run":                          {"diagnostic": "artifact binding discovered runs"},
 		"grades_omit_discovered_run":                            {"diagnostic": "verification record grades do not cover every discovered run"},
 		"evaluation_failed":                                     {"display_state": "EVALUATION-FAILED"},
+		"evaluation_open":                                       {"display_state": "EVALUATION-OPEN"},
 		"conformance_failed":                                    {"display_state": "CONFORMANCE-FAILED"},
 		"expired_record":                                        {"display_state": "EXPIRED"},
 		"empty_conformance_command":                             {"diagnostic": "conformance command must not be empty"},

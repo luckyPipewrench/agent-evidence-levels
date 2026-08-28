@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,52 @@ import (
 
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
 )
+
+func TestCLIExitStatuses(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "aelcheck")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build aelcheck: %v\n%s", err, out)
+	}
+
+	fixture := func(parts ...string) (string, string) {
+		artifact := filepath.Join(append([]string{"..", "..", "..", "fixtures"}, parts...)...)
+		return artifact, filepath.Join(artifact, "keys")
+	}
+	valid, validKeys := fixture("ael1", "valid")
+	open, openKeys := fixture("ael1", "no_close")
+
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{name: "final grade meets default", args: []string{"--keys", validKeys, valid}, want: 0},
+		{name: "final grade below minimum", args: []string{"--min-grade", "2", "--keys", validKeys, valid}, want: exitNonconforming},
+		{name: "open run is not final", args: []string{"--keys", openKeys, open}, want: exitOpen},
+		{name: "open JSON run is not final", args: []string{"--json", "--keys", openKeys, open}, want: exitOpen},
+		{name: "minimum below range is usage error", args: []string{"--min-grade", "-1", "--keys", validKeys, valid}, want: 2},
+		{name: "minimum above range is usage error", args: []string{"--min-grade", "5", "--keys", validKeys, valid}, want: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(binary, tc.args...)
+			out, err := cmd.CombinedOutput()
+			got := 0
+			if err != nil {
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) {
+					t.Fatalf("run aelcheck: %v\n%s", err, out)
+				}
+				got = exitErr.ExitCode()
+			}
+			if got != tc.want {
+				t.Errorf("exit status = %d, want %d\n%s", got, tc.want, out)
+			}
+		})
+	}
+}
 
 // Section 2 clause 7 is explicit: a producer-run or operator-run evaluation may
 // publish an authenticated result, but that result MUST NOT support a public

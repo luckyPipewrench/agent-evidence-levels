@@ -24,10 +24,11 @@ func main() {
 	jsonOut := flag.Bool("json", false, "print machine-readable result")
 	govCheck := flag.Bool("gov", false, "also report the governability extension (reversibility class per action, out of grade)")
 	keysDir := flag.String("keys", "", "directory containing published <fingerprint>.pub files")
+	minGrade := flag.Int("min-grade", 0, "require every final run to earn at least AEL-N (0-4)")
 	flag.Parse()
 
-	if *keysDir == "" || flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: aelcheck [--json] --keys <keysdir> <artifact-dir>")
+	if *keysDir == "" || flag.NArg() != 1 || *minGrade < 0 || *minGrade > 4 {
+		fmt.Fprintln(os.Stderr, "usage: aelcheck [--json] [--min-grade N] --keys <keysdir> <artifact-dir>")
 		os.Exit(2)
 	}
 
@@ -55,7 +56,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "aelcheck: encode result: %v\n", err)
 			os.Exit(1)
 		}
-		os.Exit(conformanceExit(report))
+		os.Exit(conformanceExit(report, *minGrade))
 	}
 
 	for i, res := range report.Runs {
@@ -81,7 +82,7 @@ func main() {
 		printGovernability(gov)
 	}
 	writeSelfRunNotice(os.Stdout, report)
-	os.Exit(conformanceExit(report))
+	os.Exit(conformanceExit(report, *minGrade))
 }
 
 func releaseVersion() string {
@@ -107,9 +108,11 @@ func releaseVersion() string {
 // The notice accompanies the HUMAN output only. Machine output feeds the package
 // emitter, and the package it lands in is an evaluation-package, whose schema
 // structurally cannot carry a grade and whose consumer display state is
-// EVALUATED rather than VERIFIED. That path already enforces the property; the
-// human path was the one handing out an unqualified rung number. Printing prose
-// into the JSON would also break the one consumer that exists.
+// EVALUATED rather than VERIFIED when the recorded evaluation is final and
+// conforming. The package validator also preserves a recorded open evaluation
+// as EVALUATION-OPEN. That path already enforces the property; the human path
+// was the one handing out an unqualified rung number. Printing prose into the
+// JSON would also break the one consumer that exists.
 //
 // The notice is unconditional. Attaching it to the graded path would leave an
 // ungraded run printing a line that still names AEL with nothing qualifying it,
@@ -133,13 +136,16 @@ func writeSelfRunNotice(w io.Writer, report ael.Report) {
 //	0  every run earned a grade
 //	1  the checker could not complete, so nothing was decided
 //	2  usage error
-//	3  the checker completed and at least one run did not earn a grade
+//	3  the checker completed and at least one run did not earn the required grade
+//	4  at least one run is still open/not final
 //
 // 3 is separate from 1 on purpose. Collapsing them makes a nonconforming
 // artifact indistinguishable from a broken tool, and the two demand opposite
 // responses: one is a finding about the artifact, the other is a finding about
 // the run itself.
 const exitNonconforming = 3
+
+const exitOpen = 4
 
 // conformanceExit reports the status for an evaluation that completed. A run is
 // ungraded when a required check failed or could not be verified, which is the
@@ -156,12 +162,17 @@ const exitNonconforming = 3
 // changes or another caller reaches this function directly, and a function
 // whose entire job is to report nonconformance should not have a path that
 // answers "clean" by default.
-func conformanceExit(report ael.Report) int {
+func conformanceExit(report ael.Report, minGrade int) int {
 	if len(report.Runs) == 0 {
 		return exitNonconforming
 	}
 	for _, res := range report.Runs {
-		if res.Ungraded {
+		if res.Open {
+			return exitOpen
+		}
+	}
+	for _, res := range report.Runs {
+		if res.Ungraded || res.Grade < minGrade {
 			return exitNonconforming
 		}
 	}

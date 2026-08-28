@@ -12,6 +12,7 @@ func TestConformanceExit(t *testing.T) {
 	tests := []struct {
 		name   string
 		report ael.Report
+		min    int
 		want   int
 	}{
 		{
@@ -29,8 +30,39 @@ func TestConformanceExit(t *testing.T) {
 		},
 		{
 			name:   "graded run",
-			report: ael.Report{Runs: []ael.Result{{Run: "r1"}}},
+			report: ael.Report{Runs: []ael.Result{{Run: "r1", Grade: 1}}},
 			want:   0,
+		},
+		{
+			name:   "open run is distinct from final success",
+			report: ael.Report{Runs: []ael.Result{{Run: "r1", Open: true}}},
+			want:   exitOpen,
+		},
+		{
+			name: "open status takes precedence over a final failure",
+			report: ael.Report{Runs: []ael.Result{
+				{Run: "r1", Ungraded: true},
+				{Run: "r2", Open: true, Ungraded: true},
+			}},
+			want: exitOpen,
+		},
+		{
+			name:   "grade below minimum",
+			report: ael.Report{Runs: []ael.Result{{Run: "r1", Grade: 1}}},
+			min:    2,
+			want:   exitNonconforming,
+		},
+		{
+			name:   "all runs meet minimum",
+			report: ael.Report{Runs: []ael.Result{{Run: "r1", Grade: 2}, {Run: "r2", Grade: 3}}},
+			min:    2,
+			want:   0,
+		},
+		{
+			name:   "open takes precedence over minimum",
+			report: ael.Report{Runs: []ael.Result{{Run: "r1", Grade: 0, Open: true}}},
+			min:    2,
+			want:   exitOpen,
 		},
 		{
 			name:   "ungraded run",
@@ -53,7 +85,7 @@ func TestConformanceExit(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := conformanceExit(tc.report); got != tc.want {
+			if got := conformanceExit(tc.report, tc.min); got != tc.want {
 				t.Errorf("conformanceExit = %d, want %d", got, tc.want)
 			}
 		})
