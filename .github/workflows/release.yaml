@@ -18,9 +18,26 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Pin the EXACT patch that builds published binaries. `1.25.x` was
+      # considered and rejected as a near no-op: setup-go resolves both a
+      # patchless `go 1.25` directive and `1.25.x` to the same latest 1.25
+      # patch, so it restates the policy without freezing anything.
+      #
+      # An exact pin is the right call HERE specifically because this project
+      # sells byte-reproducible verification: the clean-room proof replays a
+      # recorded result byte for byte, and a floating builder undermines the
+      # claim the release exists to make. The pin cannot rot silently, because
+      # the govulncheck gate below fails the release when this patch acquires a
+      # reachable vulnerability, which forces a deliberate bump rather than a
+      # quiet drift.
+      #
+      # The consumer floor in go.mod stays unpinned on purpose: a patch pin
+      # there would force a toolchain download on anyone building the checker
+      # from source, which an independent-verification project cannot afford,
+      # and it would not stop an old patch of a newer minor.
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: go.mod
+          go-version: "1.25.14"
 
       - name: Run release gates
         shell: bash
