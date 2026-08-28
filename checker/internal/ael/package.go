@@ -253,7 +253,7 @@ func validatePackageDir(dir, keysDir string, options PackageValidationOptions) (
 	if err := validateArtifactBinding(dir, &manifest); err != nil {
 		return PackageValidation{}, err
 	}
-	if manifest.Kind == "verification-record" && manifest.ArtifactEvaluation.ExitStatus == 0 {
+	if manifest.Kind == "verification-record" && (manifest.ArtifactEvaluation.ExitStatus == 0 || manifest.ArtifactEvaluation.ExitStatus == 4) {
 		if err := validatePackageGradesAgainstMachineOutput(dir, &manifest); err != nil {
 			return PackageValidation{}, err
 		}
