@@ -58,7 +58,7 @@ make test      # go test ./...
 make check     # regenerate + grade the whole corpus; assert every case matches its expect.json
 ```
 
-Release archives contain all three commands. Check the build identity with `aelcheck --version`, `aelgen --version`, or `aelpackage --version`; source builds report `devel`.
+Release archives contain all three commands. Check the release and Go build versions with `aelcheck --version`, `aelgen --version`, or `aelpackage --version`; source builds report `devel` as the release version.
 
 To install the commands from a checkout, run `go install ./checker/cmd/...`. Go writes them to `GOBIN`, or to the `bin` directory under the first `GOPATH` entry when `GOBIN` is unset; add that directory to `PATH` before invoking `aelcheck`, `aelgen`, or `aelpackage`.
 

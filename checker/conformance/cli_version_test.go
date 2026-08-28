@@ -41,7 +41,7 @@ func TestCLIVersionReporting(t *testing.T) {
 				if err != nil {
 					t.Fatalf("run %s --version: %v\n%s", command, err, output)
 				}
-				if got, want := string(output), command+" "+tc.want+"\n"; got != want {
+				if got, want := string(output), command+" "+tc.want+" ("+runtime.Version()+")\n"; got != want {
 					t.Fatalf("%s --version = %q, want %q", command, got, want)
 				}
 			})
