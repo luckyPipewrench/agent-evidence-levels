@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -98,7 +99,7 @@ var version = "devel"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("aelgen %s\n", releaseVersion())
+		fmt.Printf("aelgen %s (%s)\n", releaseVersion(), runtime.Version())
 		return
 	}
 	outDir := flag.String("out", "", "fixture output directory")

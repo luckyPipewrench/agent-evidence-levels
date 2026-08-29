@@ -17,11 +17,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned to the same exact patch the release workflow uses. govulncheck's
+      # source mode reports standard-library vulnerabilities against whatever Go
+      # is on PATH, so scanning on a floating `1.25.x` would answer a different
+      # question than the release does: a stdlib issue present in the release
+      # toolchain could be absent here, and the pull request would pass while the
+      # release fails, or worse, the reverse.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.25.14"
           cache: true
+
+      - name: Assert the pinned toolchain is the one running
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version | grep -qF 'go1.25.14 ' || {
+            echo "toolchain drift; expected go1.25.14 but got:"
+            go version
+            exit 1
+          }
 
       - name: Build
         run: go build ./...
@@ -39,3 +55,16 @@ jobs:
         run: |
           git diff --exit-code HEAD -- fixtures/
           test -z "$(git status --porcelain --untracked-files=all --ignored=matching -- fixtures/)"
+
+      # The release workflow gates publication on this same scan. Running it here
+      # too means a newly published advisory against the pinned toolchain surfaces
+      # on an ordinary pull request instead of for the first time during a release,
+      # and it means the step itself has been executed before a tag depends on it.
+      # A flag typo or a runner difference discovered by burning a tag is a poor
+      # way to learn that a gate does not work.
+      - name: Reject reachable vulnerabilities
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/govulncheck-bin"
+          GOBIN="$tool_dir" go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "$tool_dir/govulncheck" -db https://vuln.go.dev -mode=source ./...

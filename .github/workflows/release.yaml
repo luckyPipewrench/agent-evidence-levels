@@ -12,23 +12,60 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # JOB level, not step level. A step-level env is scoped to that step alone
+    # and is not inherited by later steps, so setting this on the gates step
+    # left the vulnerability scan and the GoReleaser build on the default
+    # GOTOOLCHAIN=auto. Either could then download and use a different compiler
+    # than the pin selects: govulncheck source mode analyses with whatever `go`
+    # is on PATH, and GoReleaser passes its own environment through to
+    # `go build`. A guard covering one of three Go commands is not a guard.
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      # Pin the EXACT patch that builds published binaries. `1.25.x` was
+      # considered and rejected as a near no-op: setup-go resolves both a
+      # patchless `go 1.25` directive and `1.25.x` to the same latest 1.25
+      # patch, so it restates the policy without freezing anything.
+      #
+      # The pin exists so the toolchain that builds a published binary is a
+      # decision rather than whatever was newest that day, and so the version
+      # the binaries self-report is predictable. It cannot rot silently: the
+      # govulncheck gate below fails the release when this patch acquires a
+      # reachable vulnerability, which forces a deliberate bump.
+      #
+      # The consumer floor in go.mod stays unpinned on purpose: a patch pin
+      # there would force a toolchain download on anyone building the checker
+      # from source, which an independent-verification project cannot afford,
+      # and it would not stop an old patch of a newer minor.
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: go.mod
+          go-version: "1.25.14"
 
       - name: Run release gates
         shell: bash
         run: |
           set -euo pipefail
+          # The pin above SELECTS a toolchain; this asserts the one actually
+          # running is that toolchain. A pin nothing verifies is a claim, and
+          # this repository's whole subject is the difference between a recorded
+          # claim and a verified one.
+          go version | grep -qF 'go1.25.14 ' || { echo "toolchain drift: $(go version), expected go1.25.14"; exit 1; }
           go vet ./...
           go test ./...
           make check
+
+      - name: Reject reachable vulnerabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/govulncheck-bin"
+          GOBIN="$tool_dir" go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "$tool_dir/govulncheck" -db https://vuln.go.dev -mode=source ./...
 
       - name: Install pinned GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3

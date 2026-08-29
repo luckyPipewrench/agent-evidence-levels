@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
 )
@@ -18,7 +19,7 @@ var version = "devel"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("aelcheck %s\n", releaseVersion())
+		fmt.Printf("aelcheck %s (%s)\n", releaseVersion(), runtime.Version())
 		return
 	}
 	jsonOut := flag.Bool("json", false, "print machine-readable result")

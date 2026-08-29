@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/luckyPipewrench/agent-evidence-levels/checker/internal/ael"
@@ -21,7 +22,7 @@ var version = "devel"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("aelpackage %s\n", releaseVersion())
+		fmt.Printf("aelpackage %s (%s)\n", releaseVersion(), runtime.Version())
 		return
 	}
 	// emit is dispatched before flag parsing so the existing validate form,
