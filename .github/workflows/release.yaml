@@ -12,6 +12,15 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # JOB level, not step level. A step-level env is scoped to that step alone
+    # and is not inherited by later steps, so setting this on the gates step
+    # left the vulnerability scan and the GoReleaser build on the default
+    # GOTOOLCHAIN=auto. Either could then download and use a different compiler
+    # than the pin selects: govulncheck source mode analyses with whatever `go`
+    # is on PATH, and GoReleaser passes its own environment through to
+    # `go build`. A guard covering one of three Go commands is not a guard.
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -39,12 +48,6 @@ jobs:
 
       - name: Run release gates
         shell: bash
-        env:
-          # Refuse an implicit toolchain switch. Without this, a `toolchain`
-          # directive added to go.mod later, or a GOTOOLCHAIN repository or
-          # organization variable, would silently download and use a different
-          # compiler than the pin selects, leaving the pin decorative.
-          GOTOOLCHAIN: local
         run: |
           set -euo pipefail
           # The pin above SELECTS a toolchain; this asserts the one actually
