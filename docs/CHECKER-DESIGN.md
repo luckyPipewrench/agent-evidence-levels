@@ -56,6 +56,11 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **R1 `replay`** — every `activity.decision` re-derives: `eval(policy, inputs) == verdict`.
 - **R2 `replay_mismatch`** — a signed record whose `eval != verdict` → R FAIL (present but not reproducible). No decision on some activity → R-pending.
 
+R answers whether the verdict follows from the recorded inputs. It does not answer whether the actor
+was authorized (SPEC §3.6). The checker therefore reports R as a replay result and never as an
+authorization result, and no R output field may be read as a statement about the acting principal,
+the authority behind the permission, or the resource scope.
+
 ## 2. Rung computation (minimum over required sub-dimensions)
 
 Per recorder then per run, compute each sub-dimension. The checker evaluates each declared

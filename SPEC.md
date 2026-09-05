@@ -100,6 +100,8 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **With R, MAY assert:** "The recorded verdict is the deterministic output of the recorded inputs under the recorded policy; the decision itself is auditable from the record." **Without R, MUST NOT assert** that a verdict can be independently re-derived, or that the decision, as opposed to its occurrence, is auditable.
 
+**MUST NOT assert:** that a reproducible decision was an authorized action. R establishes that the recorded verdict follows from the recorded inputs under the recorded policy. It establishes nothing about which principal was permitted to act, under whose authority and which policy version that permission was granted, or on which resource and within what scope. A verifier that re-derives a verdict has learned that the decision was computed as recorded, not that the actor was entitled to the outcome. Whether the record identifies the acting principal, and how strongly that identity was established, is a property of the record's content and of the producer's identity handling, and is outside every rung in this specification. R also makes no statement about whether the policy itself was correct.
+
 ### 3.7 Retention: a mandatory annotation, never a grade
 
 Retention is the operator's policy for how long records are intended to remain available for verification, and under whose storage custody. It is a mandatory annotation on every published grade. It is **not** a rung and **not** scored as proof, because it is a promise about the future and about storage that no checker can verify from an artifact presented today.
