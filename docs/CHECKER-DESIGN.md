@@ -2,8 +2,9 @@
 
 # AEL reference checker: check matrix, rung computation, fixture matrix
 
-Maps every falsifiable duty in `SPEC.md` to a concrete check and a fixture that breaks it. The
-checker implements all checks; the fixture corpus proves each one fires.
+Maps every checker-covered falsifiable duty in `SPEC.md` to a concrete check and a fixture that
+breaks it. The AEL-3 consistency-proof limitation is stated below. The checker implements all
+listed checks; the fixture corpus proves each one fires.
 
 ## 1. Checks (IDs a–t + R)
 
@@ -43,6 +44,7 @@ Every check yields `PASS` | `FAIL` | `UV`.
 - **p `alt_history`** — a re-signed alternative chain whose anchored-seq record differs → leaf ≠ anchored leaf → FAIL (anchor mismatch).
 - **q `unanchored`** — records with seq beyond the anchored head labeled `UNANCHORED-WINDOW` and capped at the unanchored rung.
 - **u `log_key_independent`** — after `n` verifies that `anchor.log_key` signed the tree head, that verified log key must differ from every verified recorder signing key on the run (same key → FAIL).
+- **v0.1 consistency limitation:** no prior signed tree head or consistency proof appears in the artifact, so no check verifies append-only extension between signed tree heads.
 
 ### AEL-4 (counterparty-confirmed)
 - **r `cp_sig`** — every counterparty statement verifies under `counterparty.key` (absent → UV).
