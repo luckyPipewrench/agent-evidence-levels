@@ -78,9 +78,9 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **Checker MUST demonstrate:** AEL-2 demonstrations; that `anchor.log_key` actually signed the tree head; that this verified log key differs from every verified recorder signing key; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
 
-**MAY assert:** "History up to each anchored head cannot be rewritten, retroactively edited, or presented in two conflicting versions without detection by any holder of the anchor references."
+**MAY assert:** "History up to the anchored head a verifier holds cannot be rewritten or retroactively edited without detection by that verifier."
 
-**MUST NOT assert:** real-time honesty (a recorder that lies at record time anchors its lie); anything about events never recorded (absence anchors as faithfully as presence); protection inside the anchor-lag window.
+**MUST NOT assert:** real-time honesty (a recorder that lies at record time anchors its lie); anything about events never recorded (absence anchors as faithfully as presence); protection inside the anchor-lag window; that an AEL-3 artifact detects log equivocation, in which a log presents different tree heads to different parties.
 
 ### AEL-4: Counterparty-confirmed
 
