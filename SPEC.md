@@ -76,11 +76,13 @@ This is the first rung at which "did anything cross the boundary unrecorded" bec
 
 **Artifact MUST add:** (a) chain heads and run-close commitments registered, at a declared cadence, in an append-only log declared by the operator as externally operated, where the log supports inclusion proofs and consistency proofs; (b) the inclusion proofs; (c) the log's identity and verification key, published.
 
+v0.1 carries and verifies inclusion proofs only. It carries no consistency proof between signed tree heads and does not verify that one signed tree head is an append-only extension of another. A verifier MUST NOT conclude append-only extension between signed tree heads from an AEL-3 artifact alone. A future artifact-format version that exercises the consistency-proof requirement MUST carry the earlier and later signed tree heads and a consistency proof, and its checker MUST verify that proof.
+
 **Checker MUST demonstrate:** AEL-2 demonstrations; that `anchor.log_key` actually signed the tree head; that this verified log key differs from every verified recorder signing key; verification of every inclusion proof against the log's signed tree head; rejection of an internally-valid alternative history that conflicts with an anchored head (fixture: a re-signed variant chain); labeling of records newer than the latest anchor as UNANCHORED-WINDOW, graded at the mechanism's unanchored rung until the next anchor lands.
 
-**MAY assert:** "History up to each anchored head cannot be rewritten, retroactively edited, or presented in two conflicting versions without detection by any holder of the anchor references."
+**MAY assert:** "History up to the anchored head a verifier holds cannot be rewritten or retroactively edited without detection by that verifier."
 
-**MUST NOT assert:** real-time honesty (a recorder that lies at record time anchors its lie); anything about events never recorded (absence anchors as faithfully as presence); protection inside the anchor-lag window.
+**MUST NOT assert:** real-time honesty (a recorder that lies at record time anchors its lie); anything about events never recorded (absence anchors as faithfully as presence); protection inside the anchor-lag window; that an AEL-3 artifact detects log equivocation, in which a log presents different tree heads to different parties.
 
 ### AEL-4: Counterparty-confirmed
 

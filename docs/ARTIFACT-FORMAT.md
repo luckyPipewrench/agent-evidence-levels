@@ -173,6 +173,13 @@ from `leaf`,`index`, `proof`,`size` and requires it equals `tree_head.root`. The
 (graded at the recorder's unanchored rung). A re-signed alternative chain whose record at an anchored
 `seq` differs yields a `leaf` that does not match the anchored `leaf` → **anchor mismatch (FAIL)**.
 
+`anchors.json` carries one signed tree head and inclusion proofs only. It carries no prior signed tree
+head or consistency proof. The checker therefore does not verify that this tree head is an append-only
+extension of another. A verifier MUST NOT conclude append-only extension between signed tree heads from
+a v0.1 artifact alone. A future artifact-format version that exercises the AEL-3 consistency-proof
+requirement MUST carry both signed tree heads and a consistency proof, and its checker MUST verify that
+proof.
+
 `tree_head` and every anchor entry are closed-schema objects. Unknown top-level keys are
 nonconforming → FAIL, except for the reserved opaque `ext` object.
 
