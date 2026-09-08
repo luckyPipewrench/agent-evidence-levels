@@ -41,12 +41,43 @@ def social():
   x=414+i*102;s+=f'<rect x="{x}" y="393" width="88" height="42" rx="21" fill="{ACCENT}" fill-opacity=".10" stroke="{ACCENT}" stroke-opacity=".34"/><text x="{x+44}" y="420" text-anchor="middle" font-family="{MONO}" font-size="16" font-weight="600" fill="{ACCENT}">AEL-{i}</text>'
  return s+f'<text x="120" y="566" font-family="{MONO}" font-size="16" fill="{DIM}" letter-spacing=".07em">{FOOT}</text></svg>\n'
 FILES={'ael-logo.svg':logo,'ael-favicon.svg':favicon,'ael-lockup.svg':lockup,'ael-lockup-stacked.svg':stacked,'social-preview.svg':social}
-PNGS={'ael-logo-256.png':'ael-logo.svg','social-preview.png':'social-preview.svg'}
+# Every size a consumer might ask for, exported from one vector. Listing them
+# here rather than as literal export lines in the Makefile keeps the size map in
+# one place; a hand export is how a logo ends up as a mark stranded in the corner
+# of its canvas, looking right in the exporter and blank everywhere else.
+ICON_SIZES=(16,32,48,64,128,256,512,1024)
+ICO_SIZES=(16,32,48,64,128,256)
+ICO_NAME='icons/ael.ico'
+PNGS={'ael-logo-256.png':('ael-logo.svg','256x256'),'social-preview.png':('social-preview.svg','1280x640')}
+PNGS.update({f'icons/ael-logo-{n}.png':('ael-logo.svg',f'{n}x{n}') for n in ICON_SIZES})
 def stamp(path,src): return 'svg '+hashlib.sha256(src.read_bytes().replace(b'\r\n',b'\n')).hexdigest()+'\npng '+hashlib.sha256(path.read_bytes()).hexdigest()+'\n'
+def render_rasters():
+ '''Export every raster from its vector and record what it came from.
+
+ -strip and the excluded date chunks keep the bytes reproducible, so a
+ re-export with no vector change does not show up as a diff.'''
+ import shutil,subprocess
+ magick=shutil.which('magick') or shutil.which('convert')
+ if magick is None: raise SystemExit('render_brand: ImageMagick is required to export rasters')
+ ladder=[]
+ for png,(svg,size) in PNGS.items():
+  src,dst=A/svg,A/png
+  if not src.exists(): print('cannot export assets/'+png+': assets/'+svg+' missing',file=sys.stderr);return 1
+  dst.parent.mkdir(parents=True,exist_ok=True)
+  subprocess.run([magick,'-background','none',str(src),'-resize',size,'-strip',
+                  '-define','png:exclude-chunks=date,time',str(dst)],check=True,capture_output=True)
+  (A/(png+'.source')).write_text(stamp(dst,src));print('exported assets/'+png)
+  n=size.split('x')[0]
+  if png.startswith('icons/') and n.isdigit() and int(n) in ICO_SIZES: ladder.append((int(n),dst))
+ ico=A/ICO_NAME;ico.parent.mkdir(parents=True,exist_ok=True)
+ subprocess.run([magick,*[str(q) for _,q in sorted(ladder)],str(ico)],check=True,capture_output=True)
+ (A/(ICO_NAME+'.source')).write_text(stamp(ico,A/'ael-logo.svg'));print('exported assets/'+ICO_NAME)
+ return 0
 def main():
- p=argparse.ArgumentParser();p.add_argument('--check',action='store_true');p.add_argument('--stamp-png',action='store_true');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--check',action='store_true');p.add_argument('--stamp-png',action='store_true');p.add_argument('--render-rasters',action='store_true');a=p.parse_args()
+ if a.render_rasters: return render_rasters()
  if a.stamp_png:
-  for png,svg in PNGS.items():(A/(png+'.source')).write_text(stamp(A/png,A/svg))
+  for png,(svg,_) in PNGS.items():(A/(png+'.source')).write_text(stamp(A/png,A/svg))
   return 0
  expected={A/n:f() for n,f in FILES.items()}
  if a.check:
@@ -55,7 +86,7 @@ def main():
   if 'assets/ael-lockup.svg' not in readme: bad.append('README.md: missing generated lockup')
   for workflow in sorted(set(re.findall(r'actions/workflows/([\w.-]+\.(?:yml|yaml))',readme))):
    if not (ROOT/'.github'/'workflows'/workflow).is_file(): bad.append('README.md: missing workflow '+workflow)
-  for png,svg in PNGS.items():
+  for png,(svg,_) in list(PNGS.items())+[(ICO_NAME,('ael-logo.svg',''))]:
    side=A/(png+'.source')
    if not (A/png).exists() or not side.exists() or side.read_text()!=stamp(A/png,A/svg):bad.append('assets/'+png)
   if bad: print('check-brand: FAIL - '+', '.join(bad),file=sys.stderr);return 1
