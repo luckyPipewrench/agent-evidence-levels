@@ -30,9 +30,19 @@ def particles(w,h):
 def logo(): return open_svg(240,240,NAME+' logo')+place(24,24,192)+'</svg>\n'
 def favicon(): return open_svg(64,64,NAME+' favicon')+f'<rect width="64" height="64" rx="14" fill="{BG}"/>'+place(10,10,44)+'</svg>\n'
 def lockup():
- return open_svg(694,112,NAME+' logo lockup')+place(20,10,96)+f'<text x="140" y="70.42" font-family="{MONO}" font-size="46" font-weight="700" letter-spacing="-.02em" xml:space="preserve"><tspan fill="{TEXT}">{LEAD}</tspan><tspan fill="{ACCENT}">Level</tspan></text></svg>\n'
+ # The mark's drawn right edge lands at x=101.2 and the wordmark's cap height is
+ # 34.5 at font-size 46, so an anchor of 127.1 leaves 0.75 of a cap height between
+ # them. It was 1.124, wide enough that the mark and the wordmark read as two
+ # objects rather than one lockup. Measured to the text ANCHOR over a cap height
+ # taken as 0.75 of the font size, which is how the sibling repositories measure
+ # the same rule; ink-to-ink gives a different number for identical artwork.
+ return open_svg(694,112,NAME+' logo lockup')+place(20,10,96)+f'<text x="127.1" y="70.42" font-family="{MONO}" font-size="46" font-weight="700" letter-spacing="-.02em" xml:space="preserve"><tspan fill="{TEXT}">{LEAD}</tspan><tspan fill="{ACCENT}">Level</tspan></text></svg>\n'
 def stacked():
- return open_svg(540,252,NAME+' stacked logo')+place(204,26,132)+f'<text x="270" y="222" text-anchor="middle" font-family="{MONO}" font-size="40" font-weight="700" letter-spacing="-.02em" xml:space="preserve"><tspan fill="{TEXT}">{LEAD}</tspan><tspan fill="{ACCENT}">Level</tspan></text></svg>\n'
+ # The mark's drawn lower edge is at y=142.9 and the cap height is 30 at font-size
+ # 40, so a baseline of 195.4 leaves the same 0.75 unit as the horizontal lockup.
+ # It was 1.637. The canvas shrinks from 252 to 226 to keep the original 30-unit
+ # margin below the wordmark rather than leaving dead space where it used to sit.
+ return open_svg(540,226,NAME+' stacked logo')+place(204,26,132)+f'<text x="270" y="195.4" text-anchor="middle" font-family="{MONO}" font-size="40" font-weight="700" letter-spacing="-.02em" xml:space="preserve"><tspan fill="{TEXT}">{LEAD}</tspan><tspan fill="{ACCENT}">Level</tspan></text></svg>\n'
 def social():
  w=1280;h=640
  s=open_svg(w,h,NAME+': '+TAG)+f'<defs><radialGradient id="teal" cx="30%" cy="20%" r="55%"><stop offset="0%" stop-color="{ACCENT}" stop-opacity=".22"/><stop offset="100%" stop-color="{ACCENT}" stop-opacity="0"/></radialGradient><radialGradient id="purple" cx="72%" cy="82%" r="55%"><stop offset="0%" stop-color="{PURPLE}" stop-opacity=".30"/><stop offset="100%" stop-color="{PURPLE}" stop-opacity="0"/></radialGradient></defs><rect width="{w}" height="{h}" fill="{BG}"/><rect width="{w}" height="{h}" fill="url(#teal)"/><rect width="{w}" height="{h}" fill="url(#purple)"/>'+particles(w,h)+place(104,174,264)
