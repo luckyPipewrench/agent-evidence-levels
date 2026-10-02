@@ -114,11 +114,13 @@ The validator prints `evaluation-package ael1-example: EVALUATED` and exits zero
 The package contains the checker, artifact, keys, and recorded command arguments. Replay the captured checker invocation from the package root:
 
 ```sh
-cd ./example/evaluation-package
-./checker/aelcheck --json --keys inputs/keys artifact
+(
+  cd ./example/evaluation-package &&
+    ./checker/aelcheck --json --keys inputs/keys artifact
+)
 ```
 
-Compare the resulting JSON with `results/artifact.json`; they must match byte for byte. This manual replay proves the packaged checker reproduces the recorded result. The package validator separately binds both files by digest, so either file changing invalidates the original manifest.
+Compare the resulting JSON with `example/evaluation-package/results/artifact.json`; they must match byte for byte. This manual replay proves the packaged checker reproduces the recorded result. The package validator separately binds both files by digest, so either file changing invalidates the original manifest.
 
 ## 6. Prove the failure direction
 
