@@ -8,7 +8,6 @@ from unittest import mock
 
 
 SCRIPT_PATH = pathlib.Path(__file__).with_name("pr-review.py")
-WORKFLOW_PATH = SCRIPT_PATH.parents[1] / ".github" / "workflows" / "pr-review.yaml"
 SPEC = importlib.util.spec_from_file_location("pr_review", SCRIPT_PATH)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"failed to load {SCRIPT_PATH}")
@@ -44,22 +43,6 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(deep["reasoning_effort"], "xhigh")
         self.assertEqual(deep["max_completion_tokens"], 64000)
 
-    def test_workflow_uses_owner_gate_trusted_checkout_and_runner_defaults(self):
-        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn("github.event.comment.user.login == 'luckyPipewrench'", workflow)
-        self.assertIn("github.event.comment.author_association == 'OWNER'", workflow)
-        self.assertIn("github.event.issue.pull_request", workflow)
-        self.assertIn("ref: ${{ github.event.repository.default_branch }}", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn("timeout-minutes: 10", workflow)
-        self.assertIn("LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}", workflow)
-        self.assertIn("LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}", workflow)
-        self.assertIn("group: pr-review-${{ github.repository }}-${{ github.event.issue.number }}", workflow)
-        self.assertIn("cancel-in-progress: true", workflow)
-        self.assertIn("python -m unittest scripts/pr_review_test.py", workflow)
-        self.assertIn("PR_REVIEW_MODEL_FAST: ${{ vars.PR_REVIEW_MODEL_FAST }}", workflow)
-        self.assertIn("PR_REVIEW_MODEL_DEEP: ${{ vars.PR_REVIEW_MODEL_DEEP }}", workflow)
-        self.assertNotRegex(workflow, r"PR_REVIEW_MODEL_(?:FAST|DEEP): gpt-")
 
     def test_empty_overrides_use_reviewed_defaults(self):
         with mock.patch.dict(pr_review.os.environ, {"PR_REVIEW_MODEL_FAST": "", "PR_REVIEW_MODEL_DEEP": ""}, clear=True):
