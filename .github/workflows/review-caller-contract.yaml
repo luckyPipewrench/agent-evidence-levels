@@ -1,6 +1,12 @@
 name: Review caller contract
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/pr-review.yaml'
+      - '.github/workflows/review-caller-contract.yaml'
+      - 'scripts/test_pr_review_workflow.py'
   pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
@@ -18,15 +24,27 @@ permissions:
   contents: read
 
 jobs:
-  contract:
+  bootstrap:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out immutable caller validator
+      - name: Check out proposed contract for unprivileged installation tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Test proposed caller and contract without provider secrets
+        run: python3 -I scripts/test_pr_review_workflow.py
+  contract:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted default-branch caller validator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: luckyPipewrench/agent-evidence-levels
-          ref: 0eef98c3eb1c73ba704c53aae3fb68c62f36459a
+          ref: ${{ github.sha }}
           path: trusted-validator
           persist-credentials: false
           sparse-checkout: scripts/test_pr_review_workflow.py
@@ -36,16 +54,21 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Only the caller YAML is read; no proposed code is executed.
+          # Proposed workflows are bounded data; no proposed code is executed.
           allow-unsafe-pr-checkout: true
           path: proposed
           persist-credentials: false
-          sparse-checkout: .github/workflows/pr-review.yaml
+          filter: blob:none
+          sparse-checkout: |
+            .github/workflows/pr-review.yaml
+            .github/workflows/review-caller-contract.yaml
           sparse-checkout-cone-mode: false
-      - name: Validate proposed caller with immutable test code
+      - name: Validate proposed caller with trusted test code
+        id: validate
         run: |
           python3 -I - <<'PY'
           import importlib.util
+          import os
           import pathlib
           import unittest
 
@@ -54,20 +77,34 @@ jobs:
           module = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(module)
           module.WORKFLOW = pathlib.Path("proposed/.github/workflows/pr-review.yaml")
+          reviewer_sha = module.validate_caller(module.WORKFLOW)
+          module.validate_contract(
+              pathlib.Path("proposed/.github/workflows/review-caller-contract.yaml")
+          )
           suite = unittest.defaultTestLoader.loadTestsFromModule(module)
           result = unittest.TextTestRunner(verbosity=2).run(suite)
-          raise SystemExit(not result.wasSuccessful())
+          if not result.wasSuccessful():
+              raise SystemExit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"reviewer_sha={reviewer_sha}\n")
           PY
       - name: Check out immutable reviewer and its security tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: luckyPipewrench/pipelock
-          ref: 3e8534e0dd621c62879238cc01d56f7e58e9d096
+          ref: ${{ steps.validate.outputs.reviewer_sha }}
           path: trusted-reviewer
           persist-credentials: false
+      - name: Install pinned reviewer test dependencies
+        working-directory: trusted-reviewer
+        run: |
+          python3 -m venv .review-test-venv
+          .review-test-venv/bin/python -m pip install --require-hashes \
+            -r .github/actions/pr-review/requirements.txt \
+            -r .github/requirements-pr-review-test.txt
       - name: Verify shared reviewer workflow protections
         working-directory: trusted-reviewer
         run: >-
-          python3 -m unittest
+          .review-test-venv/bin/python -m unittest
           scripts.pr_review_test.WorkflowPackagingTest
           scripts.pr_review_test.FailureDirectionTest.test_review_job_timeout_exceeds_the_wall_clock_with_finalization_margin
