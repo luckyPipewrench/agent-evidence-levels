@@ -34,7 +34,10 @@ jobs:
       - name: Check out proposed caller as data
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Only the caller YAML is read; no proposed code is executed.
+          allow-unsafe-pr-checkout: true
           path: proposed
           persist-credentials: false
           sparse-checkout: .github/workflows/pr-review.yaml
